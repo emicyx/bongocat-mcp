@@ -1,0 +1,61 @@
+{
+  "description": "BongoCat 桌宠播报：会话启动/收到任务/任务完成/等待审批/工具出错",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe\" \"${CLAUDE_PLUGIN_ROOT}\\hooks\\notify.py\" session-start",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe\" \"${CLAUDE_PLUGIN_ROOT}\\hooks\\notify.py\" user-prompt",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe\" \"${CLAUDE_PLUGIN_ROOT}\\hooks\\notify.py\" stop",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe\" \"${CLAUDE_PLUGIN_ROOT}\\hooks\\notify.py\" approval",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe\" \"${CLAUDE_PLUGIN_ROOT}\\hooks\\notify.py\" failure",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

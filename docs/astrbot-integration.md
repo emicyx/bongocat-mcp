@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| 版本 | v0.1（探索稿） |
+| 版本 | v0.3（探索稿；v0.2 三道路由/群摘要，v0.3 实证 AstrBot 原生触发/限流机制） |
 | 日期 | 2026-08-19 |
 | 状态 | 可行性已论证，待评审后进入实现 |
 | 关联 | [需求书 R1](requirements.md)、[架构书 §10](architecture.md)、[ZCode 插件参考实现](../zcode-plugin/bongocat-notify/hooks/notify.py) |
@@ -20,7 +20,7 @@
 
 | 需求 | 路径 | 驱动方 |
 |---|---|---|
-| "每来一条 QQ 消息，猫冒气泡转述 + 配表情"（本方案） | 插件 → 仪表盘 HTTP API | **规则代码**（确定性、零延迟、零 token） |
+| "QQ 消息按可配置路由转述：私聊/命中规则逐条气泡、群聊出摘要 + 配表情"（本方案） | 插件 → 仪表盘 HTTP API | **规则代码**（确定性、零延迟、零 token；摘要可选 LLM 润色） |
 | 用户对机器人说"让猫打个招呼"（R1，UC-1） | AstrBot MCP client → `server.py` stdio | **LLM**（自然语言 → 工具调用） |
 
 消息转述是"每条消息都要做"的高频确定性动作，交给 LLM 会引入延迟、成本与
@@ -93,10 +93,15 @@ QQ 好友/群 ──▶ NapCat / Lagrange (OneBot v11)
                   │ 消息事件
                   ▼
    astrbot_plugin_bongocat（本方案，Star 插件）
-     ①过滤（self 回环 / 开关 / 群黑白名单 / 节流）
-     ②文本化（Plain 拼接 + [图片]/[语音] 占位 + 截断）
-     ③表情映射（规则表 → 关键词匹配实时表情列表，TTL 缓存）
-     ④ aiohttp POST /api/tool
+     ①路由：私聊/直述规则(@bot、关键词、白名单成员)→逐条气泡；
+       其余群消息→按群进摘要缓冲（三车道模型，见 §4.2）
+     ②过滤：黑白名单（群 / 私聊发送者 / 群内成员），黑名单优先
+     ③文本化：Plain 拼接 + [图片]/[语音] 占位 + 截断；
+       源标注 [私] 昵称 / [群·群名] 昵称
+     ④摘要触发（可配置）：攒够 N 条 / 群静默 T 秒 / 热度突发 / 手动指令
+     ⑤摘要合成：plain 统计拼接（默认）或 LLM 一句话（失败回退）
+     ⑥表情映射（规则表 → 关键词匹配实时表情列表，TTL 缓存）
+     ⑦ aiohttp POST /api/tool
                   │ HTTP 127.0.0.1:8766
                   ▼
         bongocat-mcp 仪表盘（常驻，持唯一 driver）
@@ -131,16 +136,39 @@ astrbot_plugin_bongocat/
 
 `metadata.yaml` 关键项：`name: astrbot_plugin_bongocat`、
 `support_platforms: [aiocqhttp, qq_official, telegram, ...]`（事件面是平台无关的，
-列表声明"经测试的平台"）、`astrbot_version: ">=3.5,<5"`（事件 API 自 v3.5 稳定）。
+列表声明"经测试的平台"）、`astrbot_version: ">=4.0,<5"`（实测基线 v4.25.1）。
 
-### 4.2 消息处理管线（main.py 骨架）
+### 4.2 消息路由与处理管线（main.py 骨架）
+
+**三车道模型**（对应"配置转述哪些消息 / 群消息出摘要 / 黑白名单 / 摘要触发条件"）：
+
+```
+消息到达
+ ├─ 回环与命令过滤 → 丢弃（机器人自身消息；/ 开头且 ignore_commands=true）
+ ├─ 名单过滤（黑名单优先于白名单；白名单留空 = 放行全部）
+ │    · 群整体：group_blacklist / group_whitelist
+ │    · 私聊发送者：private_blacklist / private_whitelist
+ │    · 群内成员：sender_blacklist（全局拉黑）/ sender_whitelist（永远直述）
+ ├─ 私聊 ────────────▶【直述车道】逐条气泡（min_interval 节流）
+ └─ 群聊 → 命中直述规则？（@bot / 回复 bot / direct_keywords / sender_whitelist）
+          ├─ 是 ────▶【直述车道】[群·群名] 昵称: 内容
+          └─ 否 ────▶【摘要车道】按群环形缓冲，触发条件（OR，全部可配置）：
+                a) 攒够 trigger_count 条未播报消息
+                b) 群静默 trigger_idle_sec 秒且仍有未播报消息（话题告一段落）
+                c) 热度突发：hot_window_sec 秒内 ≥ hot_count 条
+                d) 手动：QQ 指令 /bongocat_digest <群号|all>
+             → 合成摘要（plain 统计拼接 / LLM 一句话，失败回退 plain）
+             → 气泡 + 表情映射，清空缓冲，进入 cooldown_sec 冷却
+```
 
 ```python
+import asyncio
 import time
+from collections import Counter
 import aiohttp
 from astrbot.api import logger, AstrBotConfig
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.star import Context, Star
+from astrbot.api.star import Context, Star, register
 import astrbot.api.message_components as Comp
 
 DEFAULT_EXPR_RULES = [  # 顺序即优先级，match 命中任一关键词即停
@@ -150,65 +178,171 @@ DEFAULT_EXPR_RULES = [  # 顺序即优先级，match 命中任一关键词即停
     {"match": ["谢谢", "感谢", "❤"], "expressions": ["爱心", "喜欢", "开心", "happy"]},
 ]
 
+@register(
+    "astrbot_plugin_bongocat", "bongocat-mcp",
+    "QQ 消息经桌宠猫气泡/表情转述（私聊/命中规则逐条，群聊出摘要）",
+    "0.1.0", "https://github.com/EXAMPLE/astrbot_plugin_bongocat",
+)
 class BongoCatPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
-        self._last_relay = 0.0          # 节流游标
-        self._expr_cache = (0.0, [])    # (过期时间戳, 表情列表)
-        self._expr_disabled_until = 0.0 # 猫无表情能力时的退避重查时间
+        self._last_relay = 0.0            # 直述车道节流游标
+        self._buffers: dict[str, list] = {}   # group_id -> [(昵称, 文本, ts)]
+        self._gname: dict[str, str] = {}      # group_id -> 群名（来自消息事件）
+        self._last_msg: dict[str, float] = {} # group_id -> 最后一条消息时间（静默判定）
+        self._last_digest: dict[str, float] = {}
+        self._timers: dict[str, asyncio.Task] = {}
+        self._expr_cache = (0.0, [])       # (过期时间戳, 表情列表)
+        self._expr_disabled_until = 0.0    # 猫无表情能力时的退避重查时间
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
         try:
-            await self._relay(event)
+            await self._route(event)
         except Exception as e:  # 播报链路绝不影响消息管线
-            logger.warning(f"bongocat 转述失败: {e}")
+            logger.warning(f"bongocat: {e}")
 
-    async def _relay(self, event: AstrMessageEvent):
+    # ---------- ① 路由 ----------
+    async def _route(self, event: AstrMessageEvent):
         mo = event.message_obj
-        # ① 过滤：机器人自身消息（message_sent 回环）
-        if str(mo.sender.user_id) == str(mo.self_id):
+        sender = str(mo.sender.user_id)
+        if sender == str(mo.self_id):                       # 机器人自身消息（回环）
             return
-        is_group = bool(mo.group_id)
-        if is_group and not self.config["enable_group"]: return
-        if not is_group and not self.config["enable_private"]: return
-        if is_group and self.config["group_whitelist"] \
-           and mo.group_id not in map(str, self.config["group_whitelist"]):
+        text = self._flatten(mo.message)                    # Plain 拼接 + [图片]/[语音] 占位
+        if not text:
             return
-        # 节流：窗口内直接丢弃（v1 策略：最新消息最重要）
+        lists, r = self.config["lists"], self.config["routing"]
+        if not (group_id := mo.group_id):                   # 私聊
+            if not r["enable_private"]:
+                return
+            if sender in set(map(str, lists["private_blacklist"])):
+                return
+            wl = set(map(str, lists["private_whitelist"]))
+            if wl and sender not in wl:
+                return
+            await self._relay_direct(f"[私] {event.get_sender_name()}: {text}")
+            return
+
+        # 群聊
+        gid = str(group_id)
+        if gid in set(map(str, lists["group_blacklist"])):
+            return
+        gwl = set(map(str, lists["group_whitelist"]))
+        if gwl and gid not in gwl:
+            return
+        if sender in set(map(str, lists["sender_blacklist"])):
+            return
+        if r["ignore_commands"] and text.startswith("/"):
+            return
+        gname = (getattr(mo.group, "group_name", "") or "").strip() or gid
+        self._gname[gid] = gname
+        label = f"[群·{gname}] {event.get_sender_name()}"
+        if self._hit_direct_rule(event, sender, text, r):
+            await self._relay_direct(f"{label}: {text}")
+        else:
+            self._append_digest(gid, event.get_sender_name(), text)
+
+    def _hit_direct_rule(self, event, sender, text, r) -> bool:
+        if sender in set(map(str, self.config["lists"]["sender_whitelist"])):
+            return True
+        if r.get("relay_at_bot", True):
+            for seg in event.message_obj.message:           # @机器人 → 直述
+                if isinstance(seg, Comp.At) and str(getattr(seg, "qq", "")) == \
+                        str(event.message_obj.self_id):
+                    return True
+        return any(k in text for k in r.get("direct_keywords", []))
+
+    # ---------- ② 摘要车道 ----------
+    def _append_digest(self, gid: str, name: str, text: str):
+        d, now = self.config["digest"], time.time()
+        buf = self._buffers.setdefault(gid, [])
+        buf.append((name, text[:60], now))
+        self._last_msg[gid] = now
+        if len(buf) > d["max_buffer"]:                      # 环形裁剪
+            del buf[: len(buf) - d["max_buffer"]]
+        if len(buf) >= d["trigger_count"] or self._hot(gid, d):
+            asyncio.create_task(self._fire_digest(gid, force=len(buf) >= d["max_buffer"]))
+        elif not (t := self._timers.get(gid)) or t.done():  # 静默触发定时器（每群一个）
+            self._timers[gid] = asyncio.create_task(self._idle_digest(gid, d["trigger_idle_sec"]))
+
+    def _hot(self, gid: str, d: dict) -> bool:
+        window = time.time() - d["hot_window_sec"]
+        return sum(1 for _, _, ts in self._buffers[gid] if ts >= window) >= d["hot_count"]
+
+    async def _idle_digest(self, gid: str, idle: float):
+        """等群真正静默 idle 秒（以最后一条消息起算，新消息会推迟唤醒）。"""
+        try:
+            while (wait := self._last_msg.get(gid, time.time()) + idle - time.time()) > 0:
+                await asyncio.sleep(min(wait, idle))
+            if self._buffers.get(gid):
+                await self._fire_digest(gid)
+        except asyncio.CancelledError:
+            pass
+
+    async def _fire_digest(self, gid: str, force: bool = False):
+        buf = self._buffers.get(gid) or []
+        if not buf:
+            return
+        d = self.config["digest"]
+        if not force and time.time() - self._last_digest.get(gid, 0) < d["cooldown_sec"]:
+            return                                           # 冷却中（缓冲溢出/手动则无视）
+        self._buffers[gid] = []
+        self._last_digest[gid] = time.time()
+        text = await self._compose_digest(gid, buf, d)
+        await self._relay_direct(text)
+
+    async def _compose_digest(self, gid: str, buf: list, d: dict) -> str:
+        gname = self._gname.get(gid, gid)
+        cnt = Counter(n for n, _, _ in buf)
+        top = "、".join(f"{n}×{c}" for n, c in cnt.most_common(3))
+        if len(cnt) > 3:
+            top += f" 等{len(cnt)}人"
+        plain = f"[{gname}] 群摘要·{len(buf)}条｜{top}｜最新「{buf[-1][1][:20]}」"
+        if d["mode"] != "llm":
+            return plain
+        try:                                                  # LLM 一句话摘要（v4.25.1 实测 API）
+            provider = self.context.get_using_provider()
+            transcript = "\n".join(f"{n}: {t}" for n, t, _ in buf[-30:])
+            resp = await asyncio.wait_for(provider.text_chat(
+                prompt=f"把群聊记录浓缩成一两句口语摘要，点出主要谁在聊什么：\n{transcript}",
+                system_prompt="你是桌宠猫的群聊播报员，输出简短中文摘要，可带一个 emoji。"),
+                d["llm_timeout_sec"])
+            if resp and resp.completion_text:
+                return f"[{gname}] {resp.completion_text.strip()}"
+        except Exception as e:
+            logger.warning(f"LLM 摘要失败，回退 plain: {e}")
+        return plain
+
+    # ---------- ③ 直述车道：节流 + 气泡 + 表情 ----------
+    async def _relay_direct(self, bubble: str):
         now = time.time()
         if now - self._last_relay < self.config["min_interval"]:
-            return
-        # ② 文本化
-        text = self._flatten(mo.message)          # Plain 拼接 + [图片]/[语音] 占位
-        if not text: return
-        text = text[: self.config["max_text_len"]]
-        where = "群" if is_group else "私聊"
-        bubble = f"[{where}] {event.get_sender_name()}: {text}"
-        # ③④ 气泡 + 表情
+            return                                            # 窗口内丢弃（最新消息最重要）
         self._last_relay = now
+        bubble = bubble[: max(self.config["max_text_len"], 40)]
         ok = await self._tool("show-bubble",
                               {"text": bubble, "duration": self.config["bubble_duration"]})
         if ok:
-            await self._maybe_expression(text)
+            await self._maybe_expression(bubble)
 
     async def _maybe_expression(self, text: str):
-        if time.time() < self._expr_disabled_until: return
-        exprs = await self._expressions()          # TTL 缓存 status.modelInfo.expressions
-        if exprs is None:                          # 猫/仪表盘不在线或无表情能力
+        if time.time() < self._expr_disabled_until:
+            return
+        exprs = await self._expressions()                    # TTL 缓存 status.modelInfo.expressions
+        if exprs is None:                                    # 猫/仪表盘不在线或无表情能力
             self._expr_disabled_until = time.time() + 600
             return
         for rule in DEFAULT_EXPR_RULES:
             if any(k in text for k in rule["match"]):
-                for kw in rule["expressions"]:     # notify.py 同款关键词包含匹配
+                for kw in rule["expressions"]:               # notify.py 同款关键词包含匹配
                     for e in exprs:
                         if kw.lower() in str(e.get("name", "")).lower():
                             await self._tool("set-expression",
                                              {"index": e["index"],
                                               "duration": self.config["expression_duration"]})
                             return
-                break                              # 命中规则但皮肤没有对应表情：只出气泡
+                break                                         # 皮肤没有对应表情：只出气泡
 
     async def _tool(self, cmd: str, payload: dict) -> bool:
         try:
@@ -222,24 +356,60 @@ class BongoCatPlugin(Star):
             logger.warning(f"仪表盘不可达（bongocat 播报跳过）: {e}")
             return False
 
-    async def terminate(self):
-        pass
-```
+    # ---------- 运维指令 ----------
+    @filter.command("bongocat_digest")
+    async def digest_now(self, event: AstrMessageEvent, group: str = "all"):
+        '''手动触发群摘要：/bongocat_digest <群号|all>'''
+        targets = [gid for gid, buf in self._buffers.items() if buf and group in ("all", gid)]
+        for gid in targets:
+            await self._fire_digest(gid, force=True)
+        yield event.plain_result(f"已触发摘要: {targets or '无未播报消息'}")
 
-另注册一条运维指令（远程排障很有用）：
-
-```python
     @filter.command("bongocat_status")
     async def status(self, event: AstrMessageEvent):
-        '''查看猫控链路状态'''
-        # GET /api/status 摘要 driver/capabilities/在线性，plain_result 回到 QQ
+        '''查看猫控链路状态（driver / 能力 / 在线性 / 各群缓冲条数）'''
+        # GET /api/status 摘要 + dict(self._buffers) 计数，plain_result 回到 QQ
         yield event.plain_result(...)
+
+    async def terminate(self):
+        for t in self._timers.values():
+            t.cancel()
 ```
+
+> 骨架省略 `_flatten`（消息链 → 纯文本 + 占位）与 `_expressions`（表情列表 TTL
+> 缓存）的实现，语义见 §4.3。
 
 ### 4.3 关键策略说明
 
-- **节流（突发合流）**：v1 用"窗口外放行、窗口内丢弃"（最新消息最重要）。
-  v2 可升级为合流：窗口内到达的消息计数，下一条气泡尾缀「（另有 N 条）」。
+**路由与名单**
+
+- **名单优先级：黑名单 > 白名单**；任何名单留空即"不启用该名单"（放行全部）。
+  群名单按群号、私聊名单按发送者 QQ、成员名单跨所有群生效。
+- **直述规则命中顺序**：sender_whitelist → @bot（`relay_at_bot`）→
+  `direct_keywords`（可填自己的名字/外号，别人提你时立即播报）。
+  回复（reply）机器人消息的检测作为 v1.1 增强，v1 先不做。
+- **源标注格式**：私聊 `[私] 昵称: ...`；群直述 `[群·群名] 昵称: ...`；
+  群摘要 `[群名] 群摘要·N条｜发言统计｜最新一条`。群名取
+  `event.message_obj.group.group_name`（aiocqhttp 适配器从 NapCat 上报透传，
+  v4.25.1 `aiocqhttp_platform_adapter.py:218` 实测存在），缺失时回退显示群号。
+
+**摘要车道语义**
+
+- **触发是 OR 组合**，四个条件任一满足即出摘要；触发后缓冲清空并进入
+  `cooldown_sec` 冷却——但**缓冲达到 `max_buffer` 时无视冷却强制触发**，
+  防止消息洪峰时摘要被无限推迟。
+- **"静默"以最后一条消息起算**：定时器不是简单的 sleep(idle)——新消息会
+  推迟唤醒点，真正静默 idle 秒才触发（骨架 `_idle_digest` 的 while 循环）。
+- **plain 摘要零成本**：统计 top 发言者 + 最新一条片段，不调 LLM。
+- **llm 摘要只在触发时调用**（一次摘要一次调用，非逐条消费 token）：
+  `self.context.get_using_provider().text_chat(prompt, system_prompt)`
+  （v4.25.1 `provider.py:96` 实测签名），`asyncio.wait_for` 超时/异常一律
+  回退 plain。摘要文本同样过表情规则——LLM 摘要自带的 emoji 会自然命中表情映射。
+
+**播报与降级（沿用 v0.1 策略）**
+
+- **直述车道节流**：`min_interval` 窗口外放行、窗口内丢弃（最新消息最重要）。
+  v2 可升级为"窗口内计数，下条气泡尾缀（另有 N 条）"。
 - **表情缓存**：`status.modelInfo.expressions` 以 30s TTL 缓存，按
   `(模型名, 列表长度)` 指纹失效——换皮肤/换猫后 30s 内自适应，与 ZCode 插件策略一致。
 - **无表情猫退避**：表达式列表为空或 `set-expression` 返回 `supported:false` 时，
@@ -254,25 +424,93 @@ class BongoCatPlugin(Star):
 
 ```json
 {
-  "dashboard_url":     {"type": "string",  "default": "http://127.0.0.1:8766",
-                        "description": "bongocat-mcp 仪表盘地址（python dashboard.py）"},
-  "enable_private":    {"type": "bool",    "default": true,  "description": "转述私聊消息"},
-  "enable_group":      {"type": "bool",    "default": true,  "description": "转述群消息"},
-  "group_whitelist":   {"type": "list",    "default": [],
-                        "description": "群号白名单（字符串），留空=全部群"},
-  "min_interval":      {"type": "float",   "default": 3.0,
-                        "description": "两次播报最小间隔秒数（防消息风暴刷屏）"},
-  "max_text_len":      {"type": "int",     "default": 60,   "description": "气泡最大字符数"},
-  "bubble_duration":   {"type": "int",     "default": 8,    "description": "气泡停留秒数"},
-  "expression_duration": {"type": "int",   "default": 15,
-                        "description": "表情保持秒数（到期服务端自动回默认表情；0=保持）"},
-  "relay_commands":    {"type": "bool",    "default": true,
-                        "description": "是否也转述指令消息（/开头）"}
+  "dashboard_url": {"type": "string", "default": "http://127.0.0.1:8766",
+                    "description": "bongocat-mcp 仪表盘地址（python dashboard.py）"},
+  "routing": {
+    "type": "object", "description": "消息路由：哪些消息逐条直述",
+    "items": {
+      "enable_private":   {"type": "bool", "default": true, "description": "私聊逐条转述"},
+      "enable_group":     {"type": "bool", "default": true,
+                           "description": "启用群消息（命中直述规则的逐条，其余进摘要）"},
+      "ignore_commands":  {"type": "bool", "default": true,
+                           "description": "丢弃以唤醒前缀(/)开头的消息"},
+      "relay_at_bot":     {"type": "bool", "default": true,
+                           "description": "@机器人 的群消息逐条直述"},
+      "direct_keywords":  {"type": "list", "default": [],
+                           "description": "命中任一关键词的群消息直述（如自己的名字）"},
+      "sender_whitelist": {"type": "list", "default": [],
+                           "description": "群内永远直述的成员 QQ（跨所有群）"}
+    }
+  },
+  "lists": {
+    "type": "object", "description": "黑白名单（黑名单优先；白名单留空=放行全部）",
+    "items": {
+      "group_blacklist":   {"type": "list", "default": [], "description": "不转述的群号"},
+      "group_whitelist":   {"type": "list", "default": [], "description": "只转述这些群号"},
+      "private_blacklist": {"type": "list", "default": [], "description": "不转述的私聊 QQ"},
+      "private_whitelist": {"type": "list", "default": [], "description": "只转述这些私聊 QQ"},
+      "sender_blacklist":  {"type": "list", "default": [],
+                            "description": "所有群都忽略的成员 QQ"}
+    }
+  },
+  "digest": {
+    "type": "object", "description": "群摘要：什么时候出摘要、摘要怎么写",
+    "items": {
+      "mode":             {"type": "string", "options": ["plain", "llm"], "default": "plain",
+                           "description": "plain=规则拼接（零成本）；llm=LLM 一句话摘要（失败自动回退 plain）"},
+      "trigger_count":    {"type": "int", "default": 15,
+                           "description": "攒够 N 条未播报消息即出摘要"},
+      "trigger_idle_sec": {"type": "int", "default": 180,
+                           "description": "群静默 N 秒且仍有未播报消息即出摘要"},
+      "hot_window_sec":   {"type": "int", "default": 60, "description": "热度统计窗口（秒）"},
+      "hot_count":        {"type": "int", "default": 10,
+                           "description": "窗口内达到 N 条立即出摘要"},
+      "cooldown_sec":     {"type": "int", "default": 60,
+                           "description": "两次摘要最小间隔（缓冲溢出时无视）"},
+      "max_buffer":       {"type": "int", "default": 50,
+                           "description": "每群缓冲上限（超出裁旧）"},
+      "llm_timeout_sec":  {"type": "int", "default": 15,
+                           "description": "LLM 摘要超时秒数（超时回退 plain）"}
+    }
+  },
+  "min_interval":        {"type": "float", "default": 3.0,
+                          "description": "直述车道两次气泡最小间隔秒数"},
+  "max_text_len":        {"type": "int", "default": 60, "description": "单条气泡最大字符数"},
+  "bubble_duration":     {"type": "int", "default": 8, "description": "气泡停留秒数"},
+  "expression_duration": {"type": "int", "default": 15,
+                          "description": "表情保持秒数（到期服务端自动回默认；0=保持）"}
 }
 ```
 
 AstrBot 会据此在 WebUI 生成 `data/config/astrbot_plugin_bongocat_config.json`
 并注入 `__init__`，版本升级时自动补默认值，无需迁移逻辑。
+
+### 4.5 与 AstrBot 原生消息机制的关系（v4.25.1 源码实证）
+
+"减少群聊消息触发频率"确实有原生配置，但它们的作用面与本插件不同。以下结论
+全部来自本机 AstrBot v4.25.1 源码（`astrbot/core/pipeline/`）。
+
+**管线顺序**（`stage_order.py`）——插件 handler 在第 6 站，前面有四道原生闸门：
+
+```
+WakingCheckStage → WhitelistCheckStage → SessionStatusCheckStage → RateLimitStage
+      → ContentSafety → PreProcess → ProcessStage（插件 handler / LLM）→ ...
+```
+
+**逐条实证**：
+
+| 原生机制 | 配置键（WebUI） | 对本插件的意义 |
+|---|---|---|
+| **唤醒检查** | `wake_prefix`、@、回复、私聊自动醒 | ⚠️ **管不到插件**：插件 filter 通过本身就是唤醒条件（`WakingCheckStage` 遍历 handler filter，通过即 `is_wake=True` 并放行）。`event_message_type(ALL)` 意味着每条消息都进管线——**无法用唤醒配置减少插件的触发频率**。但这不误触 LLM：LLM 的闸门是 `is_at_or_wake_command`（@/前缀/私聊才置位，插件 filter 唤醒不置位，`process_stage/stage.py:58`），被动监听安全。且本机已装的 `group_context_flow` 已在用 `event_message_type(GROUP_MESSAGE)` 监听全部群消息——"全量进管线"是现状，本插件不改变它 |
+| **限流** | `platform_settings.rate_limit` = `{time:60, count:30, strategy:"stall"\|"discard"}`（本机当前值） | ✅ **这就是原生的频率闸门**：`RateLimitStage` 在插件之前，按 `session_id`（群=群号）固定窗口计数。`stall`=超额消息延迟到下窗口；`discard`=直接丢弃；`count:0`=关闭。**注意它是全 bot 级的**（同时约束该群所有插件与机器人回复），不是插件专属。对摘要车道的交互：`discard` 会让我们"攒够 N 条"的计数只基于限流后的消息（低估活跃度）；`stall` 只延迟不丢，内容完整但触发稍晚。**建议保持 stall 或调大 count，把"猫播报频率"的控制交给插件自己的 digest 配置** |
+| **会话白名单** | `platform_settings.id_whitelist`（`enable_id_white_list`） | 在插件之前生效：不在名单的群/私聊直接终止，插件收不到——即**原生白名单自动对本插件生效**（当前本机名单为空=不检查）。但它是白名单语义且与"机器人是否回答"共享：想让机器人答群 A 但猫不播报群 A，原生做不到 → **插件自己的 `lists` 仍必要**（黑名单、成员级、独立开关），二者取交集 |
+| **自消息忽略** | `platform_settings.ignore_bot_self_message`（本机当前 False） | 开启后机器人自身消息在唤醒阶段即被终止。本插件**无论开关都保留自己的 sender==self_id 过滤**（纵深防御）；建议保持现状即可 |
+| **@全体忽略** | `platform_settings.ignore_at_all` | 只影响唤醒语义（@全体是否算唤醒），与插件触发无关 |
+
+**结论**：原生的 `rate_limit` 与 `id_whitelist` 是插件的**上游粗闸门**（全 bot 共享），
+猫播报频率的**细粒度控制由插件 digest 配置承担**（触发条数/静默/热度/冷却）；
+两者叠加时以更严格者为准。这一分工写进插件 README，避免用户误调
+`rate_limit` 来控制猫的播报频率（会连带限制机器人本身）。
 
 ---
 
@@ -287,6 +525,29 @@ AstrBot 会据此在 WebUI 生成 `data/config/astrbot_plugin_bongocat_config.js
 隐私提示：气泡会把 QQ 消息内容展示在桌面——这正是需求本身（本地转述），
 但配置里保留群白名单/私聊开关，让用户可控。
 
+### 5.1 本机部署基线（实测，2026-08-19）
+
+本机 QQbot 即"同机"形态，方案的所有前提直接满足。实测基线：
+
+| 项 | 实测值 |
+|---|---|
+| AstrBot | **v4.25.1**（源码部署），`D:\QQbot\AstrBotLauncher-0.3.0\AstrBotLauncher-0.3.0\AstrBot`，由 AstrBotLauncher 0.3.0 管理 |
+| Python | 3.12（`.python-version`），`aiohttp>=3.11.18` 在 requirements 内 ✅ |
+| 平台适配器 | `aiocqhttp`，反向 WS 监听 `0.0.0.0:6199`（NapCat 主动连 AstrBot）；NapCat Shell 44498 挂接同目录 QQ.exe |
+| LLM / 唤醒前缀 | moonshot kimi-k2.5 / `/` |
+| 插件目录 | `data/plugins/`（已有 3 个市场插件，`@register` + `AstrBotConfig` + `_conf_schema.json` 模式与 §4 骨架一致，已在同版本验证） |
+| AstrBot MCP | `data/mcp_server.json` 存在但 `mcpServers` 为空——MCP 路径（§2 路径 B）尚未开启，加一项配置即可 |
+| 猫控面 | 本项目仪表盘 `127.0.0.1:8766`，与 AstrBot 同机互通 ✅ |
+
+插件安装（本地开发态）：
+
+1. 把插件目录复制到
+   `D:\QQbot\AstrBotLauncher-0.3.0\AstrBotLauncher-0.3.0\AstrBot\data\plugins\astrbot_plugin_bongocat\`；
+2. WebUI → 插件管理 → 重载（或重启 AstrBot），配置面板会出现 §4.4 的表单项
+   （落盘为 `data/config/astrbot_plugin_bongocat_config.json`）；
+3. 保持 `python dashboard.py` 在跑；QQ 里发 `/bongocat_status` 验证链路。
+   NapCat 侧无需任何改动（插件只消费 AstrBot 事件，不碰 OneBot 连接）。
+
 ---
 
 ## 6. 风险登记与对策
@@ -300,6 +561,10 @@ AstrBot 会据此在 WebUI 生成 `data/config/astrbot_plugin_bongocat_config.js
 | R-5 | 双进程气泡（K2）叠加 | 低/低 | 插件只走仪表盘不另起进程，已是受控形态；根治等 R5 单守护进程 |
 | R-6 | AstrBot 大版本 API 变更 | 低/中 | `metadata.yaml` 锁 `astrbot_version` 区间；插件只用稳定的事件/配置面 |
 | R-7 | NapCat 风控/协议变动 | 外部依赖 | 与本方案无关（AstrBot 生态自身课题），不纳入 |
+| R-8 | LLM 摘要延迟/费用/失败 | 中/中 | 默认 plain；llm 仅在摘要触发时调用（非逐条）；超时/异常回退 plain |
+| R-9 | 个别 OneBot 实现群名字段缺失 | 低/低 | `group.group_name or 群号` 回退（v4.25.1 实测 NapCat 上报带群名） |
+| R-10 | 摘要缓冲内存 / 定时器泄漏 | 低/低 | 每群 `max_buffer` 裁旧；`terminate` 统一 cancel 定时器 |
+| R-11 | 原生 `rate_limit=discard` 使摘要计数低估活跃度 | 低/低 | 建议 stall 或调大 count（见 §4.5）；插件 README 说明二者分工 |
 
 ---
 
@@ -307,26 +572,45 @@ AstrBot 会据此在 WebUI 生成 `data/config/astrbot_plugin_bongocat_config.js
 
 1. **脚手架**：按 §4.1 建插件仓库，先实现 `/bongocat_status` 指令打通
    AstrBot → 仪表盘 HTTP（最小闭环，验收：QQ 里发指令能收到猫状态摘要）。
-2. **消息转述**：实现管线 ①②④（气泡），手工从两个 QQ 账号发私聊/群消息验收
+2. **直述车道**：私聊 + 群直述规则（@bot / 关键词 / 成员白名单）+ 名单过滤
+   + 源标注（含群名），手工从两个 QQ 账号发私聊/群消息验收
    （涉及真实 QQ 协议，无法离线单测，走真机清单）。
-3. **表情映射**：加 ③（规则表 + 关键词匹配 + TTL 缓存 + 退避），
-   分别在"有表情的 mver 皮肤 / 无表情皮肤"上验收降级行为。
-4. **压力与回环**：群内连发消息验证节流；与 LLM 对话验证无回环。
-5. **（可选）R1 并行开启**：WebUI 配置 MCP 服务器指向本项目 venv 的
-   `python server.py`，让 LLM 也能主动控猫；验证两链路并存无异常。
-6. 发布插件市场前：README（含"需先启动 dashboard.py"前置说明）、
+3. **摘要车道**：按群缓冲 + 四类触发（条数/静默/热度/手动）+ plain 合成；
+   通过 `/bongocat_digest` 手动验证，再在真实群观察三种自动触发。
+4. **表情映射**：规则表 + 关键词匹配 + TTL 缓存 + 退避，
+   分别在"有表情的 mver 皮肤 / 无表情皮肤"上验收降级行为；
+   digest 开 llm 模式验收一句话摘要与回退。
+5. **压力与回环**：群内连发消息验证节流与摘要冷却；与 LLM 对话验证无回环。
+6. **（可选）R1 并行开启**：WebUI（或 `data/mcp_server.json`，本机当前为空配置）
+   添加 stdio MCP 服务器，命令指向本项目 venv 的
+   `D:\pycharm\pycharmprojects\bongocat-mcp\.venv\Scripts\python.exe`、
+   参数 `D:\pycharm\pycharmprojects\bongocat-mcp\server.py`，
+   让 LLM 也能主动控猫；验证两链路并存无异常。
+7. 发布插件市场前：README（含"需先启动 dashboard.py"前置说明）、
    logo、ruff 格式化（AstrBot 贡献规范）。
 
 验收清单（对应需求）：
 
-- [ ] 私聊消息 → 猫气泡显示 `[私聊] 昵称: 内容`，默认 8s 消失
-- [ ] 群消息 → `[群] 昵称: 内容`；白名单生效
+**直述车道**
+- [ ] 私聊消息 → `[私] 昵称: 内容`，默认 8s 消失
+- [ ] 群内 @bot / 命中 direct_keywords → `[群·群名] 昵称: 内容` 直述
+- [ ] 黑名单群/成员零气泡；白名单只放行配置对象（群/私聊分别验证）
+
+**摘要车道**
+- [ ] 普通群消息不逐条气泡；攒够 trigger_count 条出一条摘要（含 top 发言者统计与最新一条）
+- [ ] 群静默 trigger_idle_sec 秒 → 出摘要（新消息会推迟静默判定）
+- [ ] 热度突发（hot_window_sec 内 hot_count 条）→ 立即摘要
+- [ ] 两次摘要间隔 ≥ cooldown_sec；缓冲溢出时无视冷却强制摘要
+- [ ] `/bongocat_digest <群号|all>` 手动触发成功
+- [ ] llm 模式输出一句话摘要；provider 失败/超时回退 plain 不报错
+
+**通用**
 - [ ] 含图片/语音的消息 → 占位文本，不报错不空白
-- [ ] 消息含"哈哈"等 → 猫切开心系表情，15s 后自动回默认表情
+- [ ] 消息含"哈哈"等 → 猫切开心系表情，15s 后自动回默认表情（摘要文本同理）
 - [ ] 换无表情皮肤 → 只有气泡，日志一次"无表情能力"，10 分钟退避
 - [ ] 仪表盘关闭 → AstrBot 收发消息完全不受影响
 - [ ] 机器人自己回复 → 不触发气泡（无回环）
-- [ ] 群内 1 秒连发 10 条 → 至多 1 次气泡
+- [ ] 群内 1 秒连发 10 条 → 不刷屏（进摘要车道）
 
 ---
 

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "bongo-cat": {
+      "type": "stdio",
+      "command": "D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe",
+      "args": [
+        "D:\\pycharm\\pycharmprojects\\bongocat-mcp\\server.py"
+      ]
+    }
+  }
+}

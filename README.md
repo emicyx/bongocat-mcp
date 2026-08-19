@@ -75,6 +75,37 @@ python test_client.py
 > 接入通道选型、插件骨架模板、表情可扩展性约定与验证方法论见
 > [接入开发指南 docs/zcode-plugin-dev.md](docs/zcode-plugin-dev.md)。
 
+## Claude Code 插件（bongocat-notify）
+
+`claude-plugin/` 是同一套「本地市场 + 插件」的 Claude Code 版（与 ZCode 版功能对等）：
+
+- **MCP 接入**：`.mcp.json` 把 `server.py` 注册为 stdio MCP 服务器
+  （工具名同为 `mcp__bongo-cat__*`），`/bongo-test` 命令全链路自检
+- **任务播报**：事件模型有差异——Claude Code 没有 `PermissionRequest` /
+  `PostToolUseFailure` 事件，等待审批由 `Notification` 表达（按 message 关键词
+  过滤空闲提示），工具出错由 `PostToolUse` 的 `tool_response` 保守判定
+
+安装：`claude plugin marketplace add claude-plugin/目录` →
+`claude plugin install bongocat-notify@bongocat-local`，重启会话后 `/mcp` 验证
+（详见 `claude-plugin/bongocat-notify/README.md`）。
+
+## Codex 插件（bongocat-notify）
+
+`codex-plugin/` 是同一套插件的 OpenAI Codex CLI 版（与 ZCode 版功能对等）：
+
+- **MCP 接入**：`.mcp.json`（Codex 原生直连服务器格式）把 `server.py` 注册为
+  stdio MCP 服务器，`bongo-test` 技能（`skills/*/SKILL.md`，Codex 自定义
+  prompts 已废弃、技能是官方替代）全链路自检
+- **任务播报**：Codex hooks 与 ZCode 事件几乎一一对应——`PermissionRequest`
+  是原生事件；工具出错没有 `PostToolUseFailure`，由 `PostToolUse` 的
+  `tool_response` 保守判定；hooks 由插件清单（`.codex-plugin/plugin.json`）
+  捆绑，全部 `async` 后台执行不阻塞回合
+
+安装：`codex plugin marketplace add codex-plugin/目录` →
+`codex plugin install bongocat-notify@bongocat-local` → **`/hooks` 里逐个
+Trust 这 5 个 hook**（Codex 信任审查机制，不信任不执行）→ 新会话
+`codex mcp list` 验证（详见 `codex-plugin/bongocat-notify/README.md`）。
+
 ## 配置（config.json，仪表盘可编辑）
 
 读取优先级：环境变量 `BONGOCAT_*` > `config.json` > 默认值。首次使用可复制
@@ -151,6 +182,8 @@ bongocat-mcp\
   web\index.html          # 仪表盘前端（原生单页，无构建）
   mver-mirror.py          # Mver 独立镜像进程
   zcode-plugin\           # ZCode 插件（本地市场 + bongocat-notify）
+  claude-plugin\          # Claude Code 插件（本地市场 + bongocat-notify）
+  codex-plugin\           # Codex CLI 插件（本地市场 + bongocat-notify）
   docs\                   # 需求/架构/接入文档；验证截图为本地存档不入库
 ```
 

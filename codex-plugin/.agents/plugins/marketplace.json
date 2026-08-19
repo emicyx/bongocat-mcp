@@ -1,0 +1,14 @@
+{
+  "name": "bongocat-local",
+  "interface": {
+    "displayName": "bongocat-mcp 本地插件源"
+  },
+  "plugins": [
+    {
+      "name": "bongocat-notify",
+      "source": { "source": "local", "path": "./bongocat-notify" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "description": "BongoCat 桌宠播报：会话启动/收到任务/任务完成/等待审批/工具出错",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe\" \"${PLUGIN_ROOT}\\hooks\\notify.py\" session-start",
+            "timeout": 30,
+            "statusMessage": "BongoCat：打招呼喵～",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe\" \"${PLUGIN_ROOT}\\hooks\\notify.py\" user-prompt",
+            "timeout": 30,
+            "statusMessage": "BongoCat：收到，开工喵！",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe\" \"${PLUGIN_ROOT}\\hooks\\notify.py\" stop",
+            "timeout": 30,
+            "statusMessage": "BongoCat：播报任务完成喵～",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe\" \"${PLUGIN_ROOT}\\hooks\\notify.py\" approval",
+            "timeout": 30,
+            "statusMessage": "BongoCat：等待你的审批喵？",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe\" \"${PLUGIN_ROOT}\\hooks\\notify.py\" failure",
+            "timeout": 30,
+            "statusMessage": "BongoCat：出错了喵…",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

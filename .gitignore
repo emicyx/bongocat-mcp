@@ -9,3 +9,6 @@ config.json
 gui-test-screenshots/
 docs/test-screenshots/
 docs/demo-screenshots/
+
+# 博客草稿：私密内容，不入库
+docs/blog-bongocat-mcp.md

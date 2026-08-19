@@ -76,7 +76,59 @@ my-marketplace/                  # 本地市场目录（ZCode → 发现 → + �
 4. **任何失败记日志后 exit 0 且不向 stdout 输出**——hook 的 stdout 会被客户端
    按 JSON schema 严格解析，空输出才是安全默认；通知链路绝不能阻塞会话。
 
-## 5. 验证方法论（血泪教训）
+## 5. 移植到 Claude Code（参考实现：[claude-plugin/bongocat-notify](../claude-plugin/bongocat-notify/)）
+
+结构同构，notify.py 几乎原样复用（配置文件位置换成 `~/.claude/bongocat-notify.json`），
+差异集中在清单位置与事件模型：
+
+| 差异点 | ZCode | Claude Code |
+|---|---|---|
+| 插件清单 | `.zcode-plugin/plugin.json` | `.claude-plugin/plugin.json`（`claude plugin validate <path> --strict` 可校验） |
+| 市场清单 | 市场根目录 `marketplace.json` | 市场目录下 `.claude-plugin/marketplace.json` |
+| hook 定义 | `type: "process"` + `command`/`args` 分离 + `timeoutMs` | `type: "command"` + 单条 `command` shell 字符串 + `timeout`（**秒**） |
+| 插件根变量 | `${ZCODE_PLUGIN_ROOT}` | `${CLAUDE_PLUGIN_ROOT}` |
+| 等待审批 | `PermissionRequest` 事件 | **没有对应事件**：`Notification` 事件（message 含 "needs your permission"；空闲 60 秒的 "waiting for your input" 同事件，须按关键词过滤） |
+| 工具出错 | `PostToolUseFailure` 事件 | **没有对应事件**：`PostToolUse` + 自行判定 `tool_response`（`is_error`/`isError` 为 true，或文本以 `Error`/`Exit code` 开头；保守判定宁可漏报） |
+| MCP 工具命名 | `mcp__bongo-cat__*` | 相同 |
+
+安装与热更：`claude plugin marketplace add <目录>` +
+`claude plugin install bongocat-notify@bongocat-local`。**本地市场是目录快照**，
+改插件文件后要 `marketplace remove` → 重新 add → install 才生效。
+
+## 6. 移植到 Codex（参考实现：[codex-plugin/bongocat-notify](../codex-plugin/bongocat-notify/)）
+
+Codex（OpenAI Codex CLI）自带插件系统：`.codex-plugin/plugin.json` 清单 +
+可选的 `skills/`、`hooks/hooks.json`、`.mcp.json` 捆绑组件，事件模型与 ZCode
+几乎一一对应（`SessionStart` / `UserPromptSubmit` / `Stop` / `PermissionRequest` /
+`PostToolUse`），notify.py 与 ZCode 版的差异只有一处——工具出错靠
+`PostToolUse` 的 `tool_response` 启发式判定（同 Claude Code 版的
+`response_is_error`，宁可漏报不误报）。其余差异集中在打包与信任模型：
+
+| 差异点 | ZCode | Codex |
+|---|---|---|
+| 插件清单 | `.zcode-plugin/plugin.json`（`commands`/`hooks` 字段） | `.codex-plugin/plugin.json`（`skills`/`mcpServers`/`hooks` 字段指向相对路径） |
+| 市场清单 | 市场根目录 `marketplace.json` | 市场根目录下 `.agents/plugins/marketplace.json`（`source: {source: "local", path: "./插件目录"}` + `policy` 结构） |
+| MCP 注册 | `.mcp.json` 用 `{"mcpServers": {...}}` 包裹 + `type` | `.mcp.json` 为直连服务器表 `{"bongo-cat": {command, args}}`（也可用 `mcp_servers` 包裹） |
+| hook 定义 | `type: "process"` + `command`/`args` 分离 + `timeoutMs` | `type: "command"` + 单条 `command` shell 字符串 + `timeout`（**秒**）+ 可选 `async` / `statusMessage` / matcher（正则） |
+| 插件根变量 | `${ZCODE_PLUGIN_ROOT}` | `${PLUGIN_ROOT}`（兼容 `${CLAUDE_PLUGIN_ROOT}`） |
+| 等待审批 | `PermissionRequest` 事件 | `PermissionRequest` 事件（**原生一致**，stdin 带 `tool_name`） |
+| 工具出错 | `PostToolUseFailure` 事件 | **没有对应事件**：`PostToolUse` + 自行判定 `tool_response`（`is_error`/`isError` 为 true，或文本以 `Error`/`Exit code` 开头） |
+| 斜杠命令 | `commands/*.md` | `skills/<name>/SKILL.md`（YAML frontmatter：name/description；`~/.codex/prompts` 自定义 prompts 已废弃） |
+| 信任模型 | 安装即激活 | **安装后须在 `/hooks` 里逐条 review + Trust**，否则 hook 不执行 |
+| hook 输出约定 | stdout 按 JSON schema 严格解析 | 相同；`Stop` 期望 JSON 输出，**空输出 = 放行**（零输出策略安全） |
+| MCP 工具命名 | `mcp__bongo-cat__*` | 相同 |
+
+事件输入同为 stdin JSON（`hook_event_name` / `session_id` / 事件字段），ZCode 版
+的字段防御式读取与 `stop_hook_active` 去重逻辑原样沿用。另外两点实务建议：
+通知类 hook 一律配 `async: true`（后台执行，不阻塞代理回合）；Codex 还有更原始的
+`notify` 配置（config.toml，JSON 作 argv[1] 传入，目前仅 `agent-turn-complete`
+一个事件，且项目级 config 不允许覆盖）——只想要「任务完成」播报时可用它替代。
+
+安装：`codex plugin marketplace add <市场根目录>` →
+`codex plugin install bongocat-notify@bongocat-local` → `/hooks` 逐个 Trust →
+新会话 `codex mcp list` 验证。
+
+## 7. 验证方法论（血泪教训）
 
 - **猫的视觉状态以人眼为准。** 截图 + 视觉模型判读在本次开发中多次把已生效的
   星星眼判成普通眼，把常驻发饰判成表情，误导排查方向整整一轮。
@@ -85,7 +137,7 @@ my-marketplace/                  # 本地市场目录（ZCode → 发现 → + �
 - 命令是否发出/回落是否触发看 `GET /api/events` 的事件流水。
 - 截图验证脚本务必先 `SetProcessDPIAware()`，否则窗口坐标被虚拟化、裁剪区域错位。
 
-## 6. 已知坑（mver 环境）
+## 8. 已知坑（mver 环境）
 
 | 坑 | 现象 | 规避 |
 |---|---|---|
@@ -95,7 +147,7 @@ my-marketplace/                  # 本地市场目录（ZCode → 发现 → + �
 | driver 重启闪断 | 仪表盘停止/重启期间猫失去键鼠跟随（接收模式只认网络帧） | 重启后镜像自动恢复，属预期行为；避免频繁重启 |
 | 和弦时序 | 组合键绑定要求修饰键先按住 ≥0.3s 再按触发键，同时按下不触发 | 用 driver 自带的 `_tap_chord`，不要自己拼帧 |
 
-## 7. mver 接收模式的代价（部署前必读）
+## 9. mver 接收模式的代价（部署前必读）
 
 Mver 开网络接收后会**忽略本机键鼠**，只渲染网络包，因此镜像线程成为猫的
 唯一输入来源：控制进程全部停止时猫会"冻住"不再跟随。部署任何常驻插件时，

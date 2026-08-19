@@ -1,0 +1,14 @@
+{
+  "name": "bongocat-notify",
+  "version": "0.1.0",
+  "description": "BongoCat 桌宠通知：任务完成 / 等待审批 / 工具出错时猫咪气泡播报并按表情列表切换表情；同时把 bongocat-mcp 注册为 MCP 服务器供 Codex 直接操控猫咪。",
+  "author": { "name": "bongocat-mcp" },
+  "license": "MIT",
+  "interface": {
+    "displayName": "BongoCat Notify",
+    "shortDescription": "BongoCat 桌宠播报 + bongocat-mcp 服务器接入"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json"
+}

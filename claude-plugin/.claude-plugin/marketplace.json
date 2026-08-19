@@ -1,0 +1,21 @@
+{
+  "name": "bongocat-local",
+  "owner": {
+    "name": "bongocat-mcp"
+  },
+  "metadata": {
+    "description": "bongocat-mcp 本地插件源（Claude Code）：BongoCat 桌宠通知与 MCP 接入",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "bongocat-notify",
+      "source": "./bongocat-notify",
+      "description": "Claude Code 任务事件驱动的 BongoCat 桌宠通知：任务完成/等待审批/出错时猫气泡播报并切换表情，内置 bongocat-mcp 服务器接入",
+      "version": "0.1.0",
+      "author": { "name": "bongocat-mcp" },
+      "category": "fun",
+      "keywords": ["bongocat", "desktop-pet", "notification", "mcp"]
+    }
+  ]
+}
