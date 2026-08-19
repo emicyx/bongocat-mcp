@@ -1,0 +1,69 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "process",
+            "command": "D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe",
+            "args": ["${ZCODE_PLUGIN_ROOT}\\hooks\\notify.py", "session-start"],
+            "timeoutMs": 15000,
+            "statusMessage": "BongoCat：打招呼喵～"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "process",
+            "command": "D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe",
+            "args": ["${ZCODE_PLUGIN_ROOT}\\hooks\\notify.py", "user-prompt"],
+            "timeoutMs": 15000,
+            "statusMessage": "BongoCat：收到，开工喵！"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "process",
+            "command": "D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe",
+            "args": ["${ZCODE_PLUGIN_ROOT}\\hooks\\notify.py", "stop"],
+            "timeoutMs": 15000,
+            "statusMessage": "BongoCat：播报任务完成喵～"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "process",
+            "command": "D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe",
+            "args": ["${ZCODE_PLUGIN_ROOT}\\hooks\\notify.py", "approval"],
+            "timeoutMs": 15000,
+            "statusMessage": "BongoCat：等待你的审批喵？"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "process",
+            "command": "D:\\pycharm\\pycharmprojects\\bongocat-mcp\\.venv\\Scripts\\python.exe",
+            "args": ["${ZCODE_PLUGIN_ROOT}\\hooks\\notify.py", "failure"],
+            "timeoutMs": 15000,
+            "statusMessage": "BongoCat：出错了喵…"
+          }
+        ]
+      }
+    ]
+  }
+}

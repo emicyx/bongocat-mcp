@@ -1,0 +1,5 @@
+mcp>=1.2,<2
+websockets>=13,<16
+fastapi>=0.110
+uvicorn>=0.29
+pillow>=10  # 仅测试脚本截图用，server/dashboard 运行不需要

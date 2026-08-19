@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>bongocat-mcp 仪表盘</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1d2026; --line: #2c313a;
+    --text: #e8e6e1; --dim: #9aa0aa; --accent: #f59e0b;
+    --ok: #34d399; --bad: #f87171; --skip: #94a3b8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 14px; padding: 20px;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--dim); font-size: 12px; margin-bottom: 18px; }
+  .grid { display: grid; grid-template-columns: 340px 1fr; gap: 14px; align-items: start; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px; margin-bottom: 14px;
+  }
+  .card h2 { font-size: 14px; margin-bottom: 10px; color: var(--accent); }
+  .row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed #262a31; }
+  .row:last-child { border-bottom: none; }
+  .row .k { color: var(--dim); }
+  .row .v { font-family: Consolas, monospace; }
+  .pill {
+    display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 12px;
+    background: #2c313a; margin: 1px;
+  }
+  .pill.on { background: #14532d; color: var(--ok); }
+  .pill.off { color: var(--skip); }
+  label { display: block; margin: 8px 0 3px; color: var(--dim); font-size: 12px; }
+  input, select {
+    width: 100%; padding: 6px 8px; border-radius: 6px;
+    border: 1px solid var(--line); background: #14161a; color: var(--text);
+  }
+  button {
+    padding: 7px 14px; border-radius: 6px; border: 1px solid var(--line);
+    background: #262a31; color: var(--text); cursor: pointer; margin: 4px 4px 0 0;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #14161a; font-weight: 600; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  .log {
+    font-family: Consolas, monospace; font-size: 12px; max-height: 260px;
+    overflow-y: auto; background: #14161a; border-radius: 6px; padding: 8px;
+  }
+  .log .t { color: var(--dim); margin-right: 6px; }
+  .log .ok { color: var(--ok); } .log .err { color: var(--bad); } .log .skip { color: var(--skip); }
+  .note { color: var(--dim); font-size: 12px; margin-top: 6px; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+</style>
+</head>
+<body>
+  <h1>bongocat-mcp <span>仪表盘</span></h1>
+  <div class="sub" id="configFile">加载中…</div>
+
+  <div class="grid">
+    <div><!-- 左列：状态 + 驱动 + 配置 -->
+      <div class="card">
+        <h2>状态总览 <span class="dot" id="dot"></span></h2>
+        <div class="row"><span class="k">driver</span><span class="v" id="driver">-</span></div>
+        <div class="row"><span class="k">猫状态</span><span class="v" id="cat">-</span></div>
+        <div class="row"><span class="k">模型 / 模式</span><span class="v" id="model">-</span></div>
+        <div class="row"><span class="k">窗口可见</span><span class="v" id="winv">-</span></div>
+        <div class="row"><span class="k">镜像线程</span><span class="v" id="mirror">-</span></div>
+        <div style="margin-top:8px" id="caps"></div>
+      </div>
+
+      <div class="card">
+        <h2>驱动选择</h2>
+        <select id="driverSel">
+          <option value="auto">自动探测</option>
+          <option value="embedded">embedded（自编译版）</option>
+          <option value="cdp">cdp（Tauri 成品）</option>
+          <option value="mver">mver（Mver 皮肤版）</option>
+        </select>
+        <button class="primary" onclick="switchDriver()">切换并保存</button>
+        <div style="margin-top:10px">
+          <button onclick="onboardMver()">🚀 一键接入 Mver 新猫</button>
+        </div>
+        <div class="note">自动定位运行中的新猫 → 开启网络接收（仅改其 config.json，不动程序）→ 提权重启 → 切换 driver。新猫上线后 5 秒内也会被自动识别。</div>
+      </div>
+
+      <div class="card">
+        <h2>配置（config.json）</h2>
+        <label>app_path（cdp 猫的 exe 路径）</label>
+        <input id="cfg_app_path" placeholder="D:\...\BongoCat.exe">
+        <label>app_paths（额外候选，每行一个）</label>
+        <textarea id="cfg_app_paths" rows="3" style="width:100%;background:#14161a;color:#e8e6e1;border:1px solid #2c313a;border-radius:6px;padding:6px 8px;font-family:Consolas,monospace"></textarea>
+        <label>cdp_port</label><input id="cfg_cdp_port" type="number">
+        <label>mver_dir（皮肤目录，含 config.json）</label>
+        <input id="cfg_mver_dir" placeholder="D:\A-千咲">
+        <label>mver_port（留空 = 从皮肤 config 读）</label>
+        <input id="cfg_mver_port" type="number">
+        <label>host</label><input id="cfg_host">
+        <label>dashboard_port</label><input id="cfg_dashboard_port" type="number">
+        <button class="primary" onclick="saveConfig()">保存配置</button>
+        <div class="note">端口/host 修改保存后需重启仪表盘生效；driver 相关即刻生效。</div>
+      </div>
+    </div>
+
+    <div><!-- 右列：试玩台 + 日志 -->
+      <div class="card">
+        <h2>工具试玩台</h2>
+
+        <label>表情（来自猫的实时状态）</label>
+        <select id="exprSel"><option value="">（无）</option></select>
+        <button onclick="callTool('set-expression', {index: +document.getElementById('exprSel').value})">切换表情</button>
+
+        <label>按键（KeyA / Num1 / Space …）</label>
+        <div style="display:flex;gap:6px">
+          <input id="keyInput" value="KeyA" style="flex:1">
+          <button onclick="callTool('press-key',{key:val('keyInput')})">按下</button>
+          <button onclick="callTool('release-key',{key:val('keyInput')})">松开</button>
+        </div>
+
+        <label>打字</label>
+        <div style="display:flex;gap:6px">
+          <input id="typeInput" value="hello cat" style="flex:1">
+          <button onclick="callTool('type-text',{text:val('typeInput')})">开始打字</button>
+        </div>
+
+        <label>聊天气泡</label>
+        <div style="display:flex;gap:6px">
+          <input id="bubbleInput" value="喵～" style="flex:1">
+          <button onclick="callTool('show-bubble',{text:val('bubbleInput')})">显示</button>
+          <button onclick="callTool('hide-bubble',{})">隐藏</button>
+        </div>
+
+        <div class="toolbar">
+          <button onclick="callTool('ping',{})">ping</button>
+          <button onclick="callTool('set-window-visible',{visible:true})">显示窗口</button>
+          <button onclick="callTool('set-window-visible',{visible:false})">隐藏窗口</button>
+          <button onclick="callTool('set-hand',{left:true,right:false})">左手按下</button>
+          <button onclick="callTool('set-hand',{left:false,right:false})">双手松开</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>事件日志</h2>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const val = id => $(id).value;
+
+// ---- 日志渲染：本地行（appendLog）与服务端事件（refreshEvents）共用 prepend 模型 ----
+// 服务端事件带单调 seq；环形缓冲填满后条数恒定，必须按 seq 增量取新，不能重建整块
+// innerHTML（会抹掉本地行）。DOM 超限时从尾部裁剪。
+
+const LOG_MAX_LINES = 240;  // 略高于后端 EVENTS_MAX=200
+
+const esc = s => String(s).replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function trimLog() {
+  const log = $('log');
+  while (log.children.length > LOG_MAX_LINES) log.removeChild(log.lastChild);
+}
+
+function prependLine(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  $('log').prepend(tpl.content.firstChild);
+  trimLog();
+}
+
+function logLineHTML(time, cls, label, brief) {
+  return `<div><span class="t">${esc(time)}</span><span class="${cls}">[${esc(label)}]</span> ${esc(brief)}</div>`;
+}
+
+function appendLog(cmd, result) {
+  const cls = result.supported === false ? 'skip' : (result.ok ? 'ok' : 'err');
+  const brief = result.error ? String(result.error).slice(0, 90)
+    : (result.supported === false ? '不支持' : (result.ok ? 'ok' : JSON.stringify(result).slice(0, 90)));
+  prependLine(logLineHTML(new Date().toLocaleTimeString(), cls, cmd, brief));
+}
+
+// 服务端事件 -> 单行 HTML（auto-redirect / onboard 等无 result 的信息性事件用成功色）
+function serverEventHTML(e) {
+  const d = e.detail || {};
+  const r = d.result;
+  let cls, brief;
+  if (r && typeof r === 'object') {
+    cls = r.supported === false ? 'skip' : (r.ok ? 'ok' : 'err');
+    brief = r.error ? String(r.error).slice(0, 90)
+      : (r.supported === false ? '不支持' : (r.ok ? 'ok' : JSON.stringify(r).slice(0, 90)));
+  } else {
+    cls = 'ok';
+    brief = d.note || (d.ok === true ? 'ok' : (d.ok === false ? '失败' : JSON.stringify(d).slice(0, 90)));
+  }
+  return logLineHTML(e.time, cls, d.cmd ? `${e.kind}:${d.cmd}` : e.kind, brief);
+}
+
+async function refreshStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const s = await r.json();
+    $('dot').className = 'dot ' + (s.cat ? 'ok' : 'bad');
+    $('driver').textContent = s.driver || '（未探测到）';
+    $('configFile').textContent = '配置文件: ' + s.configFile;
+
+    if (s.cat && s.cat.ok) {
+      const info = s.cat.data?.modelInfo || {};
+      $('cat').textContent = '在线';
+      $('model').textContent = `${info.modelId || '-'} / ${info.mode || '-'}`;
+      $('winv').textContent = String(s.cat.data?.windowVisible ?? '-');
+      $('mirror').textContent = s.mirrorAlive ? '运行中' : '—';
+      const exprs = info.expressions || [];
+      // 仅在列表实际变化且未聚焦时重建，保留用户已选项（否则每 2s 重置选中/收起下拉）
+      const fp = JSON.stringify(exprs.map(e => [e.index, e.name]));
+      if ($('exprSel').dataset.fp !== fp && document.activeElement !== $('exprSel')) {
+        const prev = $('exprSel').value;
+        $('exprSel').innerHTML = exprs.length
+          ? exprs.map(e => `<option value="${e.index}">${e.index} · ${esc(e.name || '')}</option>`).join('')
+          : '<option value="">（此猫无表情能力）</option>';
+        $('exprSel').dataset.fp = fp;
+        if (prev && [...$('exprSel').options].some(o => o.value === prev)) $('exprSel').value = prev;
+      }
+    } else {
+      $('cat').textContent = '离线';
+      $('model').textContent = '-';
+      $('winv').textContent = '-';
+      $('mirror').textContent = '-';
+      if ($('exprSel').dataset.fp !== '') {
+        $('exprSel').innerHTML = '<option value="">（无）</option>';
+        $('exprSel').dataset.fp = '';
+      }
+      const reason = s.error || (s.cat && s.cat.error);
+      if (reason) $('cat').textContent = '离线：' + String(reason).slice(0, 60);
+    }
+
+    $('caps').innerHTML = (s.capabilities || [])
+      .map(c => `<span class="pill on">${c}</span>`).join(' ')
+      + (s.commands || []).filter(c => !(s.capabilities || []).includes(c))
+        .map(c => `<span class="pill off">${c}</span>`).join('');
+
+    // 表单底稿（仅首次或无焦点/未修改时刷新，避免打字被打断、未保存的选择被重置）
+    const c = s.config || {};
+    if (s.autoRedirect && s.autoRedirect.to) {
+      appendLog('auto-redirect', {ok: true, error: '已自动接入运行中的猫: ' + s.autoRedirect.to});
+    }
+    if (document.activeElement !== $('cfg_app_path')) $('cfg_app_path').value = c.app_path || '';
+    if (document.activeElement !== $('cfg_mver_dir')) $('cfg_mver_dir').value = c.mver_dir || '';
+    if (document.activeElement !== $('cfg_cdp_port')) $('cfg_cdp_port').value = c.cdp_port ?? '';
+    if (document.activeElement !== $('cfg_mver_port')) $('cfg_mver_port').value = c.mver_port ?? '';
+    if (document.activeElement !== $('cfg_host')) $('cfg_host').value = c.host || '';
+    if (document.activeElement !== $('cfg_dashboard_port')) $('cfg_dashboard_port').value = c.dashboard_port ?? '';
+    if (document.activeElement !== $('cfg_app_paths')
+        && !$('cfg_app_paths').dataset.touched) {
+      $('cfg_app_paths').value = (c.app_paths || []).join('\n');
+    }
+    if (!$('driverSel').dataset.touched) $('driverSel').value = c.driver || 'auto';
+  } catch (e) {
+    $('dot').className = 'dot bad';
+    $('driver').textContent = '仪表盘服务错误';
+  }
+}
+
+async function saveConfig() {
+  const values = {
+    app_path: val('cfg_app_path'),
+    app_paths: val('cfg_app_paths').split('\n').map(s => s.trim()).filter(Boolean),
+    cdp_port: +val('cfg_cdp_port') || null,
+    mver_dir: val('cfg_mver_dir'),
+    mver_port: +val('cfg_mver_port') || null,
+    host: val('cfg_host'),
+    dashboard_port: +val('cfg_dashboard_port') || null,
+  };
+  const r = await fetch('/api/config', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({values}),
+  });
+  const res = await r.json();
+  appendLog('save-config', res);
+  // 保存成功后重置 touched 标记，让后续轮询能继续同步服务端值
+  if (res.ok) $('cfg_app_paths').dataset.touched = '';
+  refreshStatus();
+}
+
+async function switchDriver() {
+  const name = val('driverSel');
+  const r = await fetch('/api/driver', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name}),
+  });
+  const res = await r.json();
+  appendLog('switch-driver', res);
+  // 无论成败都解除 touched：成功则值一致，失败则回同步已保存的配置
+  $('driverSel').dataset.touched = '';
+  refreshStatus();
+}
+
+async function onboardMver() {
+  appendLog('onboard', {ok: true, error: '接入中…（可能重启猫进程，请稍候）'});
+  const body = {};
+  const dir = val('cfg_mver_dir');
+  if (dir) body.dir = dir;
+  const r = await fetch('/api/mver/onboard', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  const res = await r.json();
+  appendLog('onboard', res.ok ? {ok: true, error: (res.steps || []).join(' | ')} : res);
+  refreshStatus();
+}
+
+async function callTool(cmd, payload) {
+  try {
+    const r = await fetch('/api/tool', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({cmd, payload}),
+    });
+    await r.json();
+  } catch (e) {
+    appendLog(cmd, {ok: false, error: '请求失败: ' + e});
+    return;
+  }
+  // 成功与失败均已由服务端 dispatch 记为事件，立即拉取呈现（本地不再重复记一条）
+  refreshStatus();
+  refreshEvents();
+}
+
+// 事件日志拉取（仪表盘进程内发生的调用）；按 seq 增量 prepend。
+// 历史渲染只允许发生一次（专用标志位）：若以 _lastSeq===undefined 判断，
+// 服务端缓冲为空时（刚重启）会一直不置位，等首批事件到达时再次整体重建、
+// 抹掉已积累的本地行。
+async function refreshEvents() {
+  try {
+    const r = await fetch('/api/events');
+    const s = await r.json();
+    const evs = s.events || [];
+    if (!refreshEvents._boot) {
+      refreshEvents._boot = true;
+      $('log').innerHTML = evs.slice().reverse().map(serverEventHTML).join('');
+      trimLog();
+    } else {
+      const last = refreshEvents._lastSeq || 0;
+      for (const e of evs.filter(e => (e.seq || 0) > last)) {
+        prependLine(serverEventHTML(e));  // 升序 prepend，最新在最上
+      }
+    }
+    if (evs.length) {
+      refreshEvents._lastSeq = Math.max(refreshEvents._lastSeq || 0,
+        ...evs.map(e => e.seq || 0));
+    }
+  } catch (e) { /* 忽略 */ }
+}
+
+$('cfg_app_paths').addEventListener('input', () => $('cfg_app_paths').dataset.touched = '1');
+$('driverSel').addEventListener('change', () => $('driverSel').dataset.touched = '1');
+setInterval(refreshStatus, 2000);
+setInterval(refreshEvents, 3000);
+refreshStatus();
+refreshEvents();
+</script>
+</body>
+</html>

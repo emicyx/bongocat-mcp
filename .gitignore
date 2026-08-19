@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+**/__pycache__/
+config.json
+*.log
+*.pid
+
+# 探索性 / 本地文件：不入库（含开发者桌面画面）
+gui-test-screenshots/
+docs/test-screenshots/
+docs/demo-screenshots/

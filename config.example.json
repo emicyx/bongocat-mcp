@@ -1,0 +1,14 @@
+{
+  "driver": "",
+  "host": "127.0.0.1",
+  "app_path": "",
+  "app_paths": [],
+  "cdp_port": 9223,
+  "mver_dir": "",
+  "mver_port": null,
+  "embedded_config": "",
+  "embedded_port": null,
+  "embedded_token": "",
+  "dashboard_host": "127.0.0.1",
+  "dashboard_port": 8766
+}
