@@ -230,7 +230,8 @@ def app_path_candidates() -> list[str]:
 
     found = w32.find_process(
         name_contains="bongo",
-        name_excludes=("mver", "ui", "converter"),
+        # "mcp"：本项目控制器进程（bongocat-mcp.exe）不能被当成猫，接管时会 taskkill
+        name_excludes=("mver", "ui", "converter", "mcp"),
     )
     if found:
         exe = w32.process_exe_path(found[0])
@@ -261,7 +262,7 @@ class CdpWebview2Driver(CatDriver):
         if self.pid is None:
             found = w32.find_process(
                 name_contains="bongo",
-                name_excludes=("mver", "ui", "converter"),
+                name_excludes=("mver", "ui", "converter", "mcp"),
             )
             if found:
                 self.pid = found[0]
@@ -285,7 +286,7 @@ class CdpWebview2Driver(CatDriver):
             # 猫在跑但没开调试端口 → 重启接管（状态由应用自身持久化恢复）
             if self.pid is not None and w32.kill_process(self.pid):
                 for _ in range(50):
-                    if w32.find_process(name_contains="bongo", name_excludes=("mver", "ui", "converter")) is None:
+                    if w32.find_process(name_contains="bongo", name_excludes=("mver", "ui", "converter", "mcp")) is None:
                         break
                     time.sleep(0.2)
 
@@ -310,7 +311,7 @@ class CdpWebview2Driver(CatDriver):
                     if self.pid is None:
                         found = w32.find_process(
                             name_contains="bongo",
-                            name_excludes=("mver", "ui", "converter"),
+                            name_excludes=("mver", "ui", "converter", "mcp"),
                         )
                         if found:
                             self.pid = found[0]
@@ -418,7 +419,7 @@ class CdpWebview2Driver(CatDriver):
                 self._ensure_attached()
                 if self.pid is None:
                     found = w32.find_process(
-                        name_contains="bongo", name_excludes=("mver", "ui", "converter"),
+                        name_contains="bongo", name_excludes=("mver", "ui", "converter", "mcp"),
                     )
                     self.pid = found[0] if found else None
                 # 猫不在线直接跳过：气泡是时效性通知，不排队也不在猫恢复后补发

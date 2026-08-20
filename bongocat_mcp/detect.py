@@ -65,7 +65,9 @@ def resolve_driver(*, refresh: bool = False, forced: str | None = None) -> CatDr
         from bongocat_mcp.drivers.cdp_webview2 import CdpWebview2Driver, app_path_candidates
         if (config.get("app_path")
                 or w32.find_process(
-                    name_contains="bongo", name_excludes=("mver", "ui", "converter"),
+                    # "mcp"：排除本项目控制器进程（bongocat-mcp.exe），防被当成猫
+                    name_contains="bongo",
+                    name_excludes=("mver", "ui", "converter", "mcp"),
                 )
                 or app_path_candidates()):
             _driver = CdpWebview2Driver()
