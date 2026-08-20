@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| 版本 | v0.3（探索稿；v0.2 三道路由/群摘要，v0.3 实证 AstrBot 原生触发/限流机制） |
-| 日期 | 2026-08-19 |
-| 状态 | 可行性已论证，待评审后进入实现 |
+| 版本 | v1.0（v0.2 三道路由/群摘要，v0.3 实证原生触发/限流，v1.0 插件实现落地） |
+| 日期 | 2026-08-20 |
+| 状态 | **已实现**：插件位于 `astrbot-plugin/astrbot_plugin_bongocat/`（经 junction 部署到本机 AstrBot，离线测试 26/26 通过，AstrBot v4.25.1 venv 冒烟导入通过）；待真机 QQ 验收（§7） |
 | 关联 | [需求书 R1](requirements.md)、[架构书 §10](architecture.md)、[ZCode 插件参考实现](../zcode-plugin/bongocat-notify/hooks/notify.py) |
 
 ---
@@ -127,16 +127,18 @@ QQ 好友/群 ──▶ NapCat / Lagrange (OneBot v11)
 
 ```
 astrbot_plugin_bongocat/
-├── metadata.yaml        # name/desc/version/astrbot_version/support_platforms
-├── main.py              # Star 插件主类
-├── _conf_schema.json    # WebUI 可视化配置
-├── requirements.txt     # 留空：只用 AstrBot 自带 aiohttp
+├── metadata.yaml        # name/desc/version/repo/display_name
+├── main.py              # Star 插件主类（不用 @register——v3.5.19 起已废弃，
+│                        #   AstrBot 自动识别 Star 子类；被动监听器用普通协程）
+├── _conf_schema.json    # WebUI 可视化配置（routing / lists / digest 三组）
+├── requirements.txt     # 留空：只用 AstrBot 自带 aiohttp（懒加载导入）
 └── README.md
+../tests/                # 离线单元测试（stub astrbot，验证路由/摘要/降级，
+                         #   python astrbot-plugin/tests/test_bongocat_plugin.py）
 ```
 
-`metadata.yaml` 关键项：`name: astrbot_plugin_bongocat`、
-`support_platforms: [aiocqhttp, qq_official, telegram, ...]`（事件面是平台无关的，
-列表声明"经测试的平台"）、`astrbot_version: ">=4.0,<5"`（实测基线 v4.25.1）。
+`metadata.yaml` 关键项：`name: astrbot_plugin_bongocat`；实测基线 v4.25.1
+（`call_handler` 同时支持协程与异步生成器，源码 `context_utils.py:12`）。
 
 ### 4.2 消息路由与处理管线（main.py 骨架）
 
@@ -469,8 +471,8 @@ class BongoCatPlugin(Star):
                            "description": "两次摘要最小间隔（缓冲溢出时无视）"},
       "max_buffer":       {"type": "int", "default": 50,
                            "description": "每群缓冲上限（超出裁旧）"},
-      "llm_timeout_sec":  {"type": "int", "default": 15,
-                           "description": "LLM 摘要超时秒数（超时回退 plain）"}
+      "llm_timeout_sec":  {"type": "int", "default": 45,
+                           "description": "LLM 摘要超时秒数（超时回退 plain；思考型模型如 kimi-k2.5 建议 ≥45）"}
     }
   },
   "min_interval":        {"type": "float", "default": 3.0,
@@ -525,24 +527,25 @@ WakingCheckStage → WhitelistCheckStage → SessionStatusCheckStage → RateLim
 隐私提示：气泡会把 QQ 消息内容展示在桌面——这正是需求本身（本地转述），
 但配置里保留群白名单/私聊开关，让用户可控。
 
-### 5.1 本机部署基线（实测，2026-08-19）
+### 5.1 部署基线（实测，2026-08-19）
 
-本机 QQbot 即"同机"形态，方案的所有前提直接满足。实测基线：
+开发者本机即"同机"形态，方案的所有前提直接满足。实测基线（下文
+`<ASTRBOT_ROOT>` 指 AstrBot 源码根目录，按实际安装位置替换）：
 
 | 项 | 实测值 |
 |---|---|
-| AstrBot | **v4.25.1**（源码部署），`D:\QQbot\AstrBotLauncher-0.3.0\AstrBotLauncher-0.3.0\AstrBot`，由 AstrBotLauncher 0.3.0 管理 |
+| AstrBot | **v4.25.1**（源码部署，AstrBotLauncher 0.3.0 管理，`<ASTRBOT_ROOT>`） |
 | Python | 3.12（`.python-version`），`aiohttp>=3.11.18` 在 requirements 内 ✅ |
-| 平台适配器 | `aiocqhttp`，反向 WS 监听 `0.0.0.0:6199`（NapCat 主动连 AstrBot）；NapCat Shell 44498 挂接同目录 QQ.exe |
-| LLM / 唤醒前缀 | moonshot kimi-k2.5 / `/` |
-| 插件目录 | `data/plugins/`（已有 3 个市场插件，`@register` + `AstrBotConfig` + `_conf_schema.json` 模式与 §4 骨架一致，已在同版本验证） |
+| 平台适配器 | `aiocqhttp`，反向 WS 监听 `0.0.0.0:6199`（NapCat 主动连 AstrBot）；NapCat Shell 挂接同目录 QQ.exe |
+| LLM / 唤醒前缀 | moonshot kimi-k2.5（思考型模型，摘要调用需关思考，见 §7）/ `/` |
+| 插件目录 | `data/plugins/`（已有市场插件验证 `Star 子类` + `AstrBotConfig` + `_conf_schema.json` 模式与 §4 骨架一致） |
 | AstrBot MCP | `data/mcp_server.json` 存在但 `mcpServers` 为空——MCP 路径（§2 路径 B）尚未开启，加一项配置即可 |
 | 猫控面 | 本项目仪表盘 `127.0.0.1:8766`，与 AstrBot 同机互通 ✅ |
 
 插件安装（本地开发态）：
 
-1. 把插件目录复制到
-   `D:\QQbot\AstrBotLauncher-0.3.0\AstrBotLauncher-0.3.0\AstrBot\data\plugins\astrbot_plugin_bongocat\`；
+1. 把插件目录复制（或建目录连接）到
+   `<ASTRBOT_ROOT>\data\plugins\astrbot_plugin_bongocat\`；
 2. WebUI → 插件管理 → 重载（或重启 AstrBot），配置面板会出现 §4.4 的表单项
    （落盘为 `data/config/astrbot_plugin_bongocat_config.json`）；
 3. 保持 `python dashboard.py` 在跑；QQ 里发 `/bongocat_status` 验证链路。
@@ -568,7 +571,62 @@ WakingCheckStage → WhitelistCheckStage → SessionStatusCheckStage → RateLim
 
 ---
 
-## 7. 实施步骤（建议）
+## 7. 实现落地记录（v1.0）
+
+插件实现于 `astrbot-plugin/astrbot_plugin_bongocat/`，与 v0.3 方案相比的
+**实现期决策与修正**（全部经离线测试验证）：
+
+1. **摘要车道独立预算**（修正方案骨架的设计缺陷）：骨架里 `_fire_digest` 复用
+   `_relay_direct`，会被直述车道的 `min_interval` 吞掉。实现改为 digest 车道
+   独立游标，仅保留 `digest.spacing`（默认 1.2s，防多群同时触发互相覆盖气泡）。
+2. **摘要失败不消费缓冲**：气泡发送成功后才 `del buf[:n]`（只消费本次快照，
+   期间新到的消息保留）；仪表盘掉线时缓冲保留，恢复后下次触发重试。
+3. **`ignore_commands` 同时作用于私聊车道**（测试发现骨架只在群聊检查）。
+4. **OTHER 类消息忽略**：既非群聊也非私聊的事件（`group_id` 空且
+   `is_private_chat()` 假）直接丢弃。
+5. **回复 bot 也直述**：`Comp.Reply.sender_id == self_id`（v4.25.1 唤醒阶段
+   同款判定），配置 `routing.relay_reply` 可关。
+6. **不用 `@register` 装饰器**：源码标注 DEPRECATED（v3.5.19+），Star 子类
+   自动识别；被动监听器是普通 `async def`（`call_handler` 兼容两种形态）。
+7. **aiohttp 懒加载**：`_client()` 内 import——依赖缺失时导入插件不炸，
+   仅运行时报警（AstrBot 必带 aiohttp，防御性设计）。
+8. **配置防御式读取**：`_deep()` 逐级取键带默认值，Schema 升级/旧配置
+   缺键不崩。
+9. **群名回退链**：`group.group_name` 缺失或为适配器缺省值 `"N/A"` 时回退群号
+   （aiocqhttp 适配器 `event.get("group_name", "N/A")`，`aiocqhttp_platform_adapter.py:219`）。
+
+**真机联调发现并修复（2026-08-20）**：
+
+10. **aiohttp 懒加载作用域 bug**：`_request()` 引用 `aiohttp.ClientTimeout`
+    但 import 写在 `_client()` 里（函数内 import 不跨作用域）→ 每次调用
+    `NameError`。修复后补回归测试直接执行真实 `_request` 路径（此前测试桩掉了
+    `_tool/_get`，该路径从未被执行——教训：HTTP 层必须有非桩用例）。
+11. **思考型模型的 LLM 摘要超时/空输出**：kimi-k2.5 默认先推理后作答——实测
+    开思考时小任务 9.3s 且 `finish_reason=length`（推理耗尽 max_tokens、
+    可见输出为空），15s 超时必现；关思考后 1.4s 正常输出。修复：摘要调用
+    默认透传 `thinking: {"type": "disabled"}`（经 AstrBot text_chat kwargs →
+    `extra_body` 链，v4.25.1 源码 `_query` 实证），配置
+    `digest.llm_disable_thinking` 可关；`llm_timeout_sec` 默认 15→45；
+    三条回退路径（无 provider / 空输出 / 异常）全部记日志。
+
+**验证状态**：
+
+- 离线单元测试 27/27 通过（stub astrbot 模块；覆盖三车道路由、名单、
+  摘要四类触发与冷却、溢出强制、失败保留缓冲、表情能力感知与退避、
+  LLM 摘要及回退、真实 `_request` 路径、占位文本、指令、异常吞噬）。
+- AstrBot v4.25.1 venv（Python 3.12.3）真实代码冒烟导入 + 对活仪表盘的
+  端到端 HTTP（ping/status/表情列表）通过。
+- **真机已验证**（2026-08-20）：私聊逐条转述、群摘要触发与输出、
+  LLM 摘要（kimi 关思考后秒级出结果）、表情列表读取。
+- 部署方式：`data/plugins/astrbot_plugin_bongocat` 指向仓库源码的
+  目录连接（junction）——改完代码在 WebUI 插件管理"重载"即生效，无需复制。
+- 待验（需真机两个 QQ 账号补完）：§8 清单其余项（@bot 直述、黑白名单、
+  静默/热度触发、回环、仪表盘关闭不影响收发等）。
+
+## 8. 真机验收步骤与清单
+
+> 1-2 步（脚手架/直述/摘要/表情的核心逻辑）已由离线测试覆盖并落地；
+> 真机部分从第 3 步开始。
 
 1. **脚手架**：按 §4.1 建插件仓库，先实现 `/bongocat_status` 指令打通
    AstrBot → 仪表盘 HTTP（最小闭环，验收：QQ 里发指令能收到猫状态摘要）。
@@ -581,10 +639,9 @@ WakingCheckStage → WhitelistCheckStage → SessionStatusCheckStage → RateLim
    分别在"有表情的 mver 皮肤 / 无表情皮肤"上验收降级行为；
    digest 开 llm 模式验收一句话摘要与回退。
 5. **压力与回环**：群内连发消息验证节流与摘要冷却；与 LLM 对话验证无回环。
-6. **（可选）R1 并行开启**：WebUI（或 `data/mcp_server.json`，本机当前为空配置）
+6. **（可选）R1 并行开启**：WebUI（或 `data/mcp_server.json`，部署基线为空配置）
    添加 stdio MCP 服务器，命令指向本项目 venv 的
-   `D:\pycharm\pycharmprojects\bongocat-mcp\.venv\Scripts\python.exe`、
-   参数 `D:\pycharm\pycharmprojects\bongocat-mcp\server.py`，
+   `<仓库根>\.venv\Scripts\python.exe`、参数 `<仓库根>\server.py`，
    让 LLM 也能主动控猫；验证两链路并存无异常。
 7. 发布插件市场前：README（含"需先启动 dashboard.py"前置说明）、
    logo、ruff 格式化（AstrBot 贡献规范）。
@@ -614,7 +671,7 @@ WakingCheckStage → WhitelistCheckStage → SessionStatusCheckStage → RateLim
 
 ---
 
-## 8. 参考资料
+## 9. 参考资料
 
 - [AstrBot 插件开发指南（事件监听）](https://docs.astrbot.app/dev/star/guides/listen-message-event.html)
 - [AstrBot 插件最小实例](https://docs.astrbot.app/dev/star/guides/simple.html)

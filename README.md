@@ -59,6 +59,25 @@ python mver-mirror.py --visible     # 前台调试模式（Ctrl+C 退出）
 python test_client.py
 ```
 
+## AstrBot 插件（astrbot_plugin_bongocat）
+
+`astrbot-plugin/` 目录是 AstrBot 插件 **astrbot_plugin_bongocat**：读取机器人
+QQ 账号收到的消息，经仪表盘 HTTP API 让猫气泡转述 + 切表情——
+
+- **三车道路由**：私聊与命中规则（@bot / 回复 / 关键词 / 白名单成员）的群消息
+  逐条播报（`[私] 昵称: ...`、`[群·群名] 昵称: ...`）；其余群消息按群缓冲，
+  攒够 N 条 / 群静默 T 秒 / 热度突发 / `/bongocat_digest` 手动时出一条摘要
+  （plain 统计拼接，或 LLM 一句话，失败回退）
+- **黑白名单**：群 / 私聊发送者 / 群内成员三个维度，黑名单优先，WebUI 可配
+- **表情自动适配**：实时读当前猫的表情列表按关键词匹配，换皮肤自适应；
+  猫无表情素材时降级为仅气泡（10 分钟退避重查）
+- 安装：把 `astrbot-plugin/astrbot_plugin_bongocat` 复制（或建目录连接）到
+  AstrBot 的 `data/plugins/`，保持 `python dashboard.py` 运行；
+  离线测试 `python astrbot-plugin/tests/test_bongocat_plugin.py`
+
+设计与 AstrBot 原生机制（rate_limit/白名单）的分工说明见
+[docs/astrbot-integration.md](docs/astrbot-integration.md)。
+
 ## ZCode 插件（bongocat-notify）
 
 `zcode-plugin/` 目录是一个**本地插件市场 + 插件**，让 Zcode 接入本 MCP server：
@@ -189,6 +208,7 @@ bongocat-mcp\
   zcode-plugin\           # ZCode 插件（本地市场 + bongocat-notify）
   claude-plugin\          # Claude Code 插件（本地市场 + bongocat-notify）
   codex-plugin\           # Codex CLI 插件（本地市场 + bongocat-notify）
+  astrbot-plugin\         # AstrBot 插件 astrbot_plugin_bongocat（QQ 消息转述 + tests）
   docs\                   # 需求/架构/接入文档；验证截图为本地存档不入库
 ```
 

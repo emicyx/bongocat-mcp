@@ -1,0 +1,157 @@
+{
+  "dashboard_url": {
+    "type": "string",
+    "default": "http://127.0.0.1:8766",
+    "description": "bongocat-mcp 仪表盘地址（需先运行 python dashboard.py）",
+    "hint": "插件经此 HTTP API 驱动猫，不直接创建 driver"
+  },
+  "routing": {
+    "type": "object",
+    "description": "消息路由：哪些消息逐条直述",
+    "items": {
+      "enable_private": {
+        "type": "bool",
+        "default": true,
+        "description": "私聊逐条转述"
+      },
+      "enable_group": {
+        "type": "bool",
+        "default": true,
+        "description": "启用群消息（命中直述规则的逐条播报，其余进摘要）"
+      },
+      "ignore_commands": {
+        "type": "bool",
+        "default": true,
+        "description": "丢弃以唤醒前缀(/)开头的消息"
+      },
+      "relay_at_bot": {
+        "type": "bool",
+        "default": true,
+        "description": "@机器人 的群消息逐条直述"
+      },
+      "relay_reply": {
+        "type": "bool",
+        "default": true,
+        "description": "引用/回复机器人消息的群消息逐条直述"
+      },
+      "direct_keywords": {
+        "type": "list",
+        "default": [],
+        "description": "命中任一关键词的群消息直述（如自己的名字）"
+      },
+      "sender_whitelist": {
+        "type": "list",
+        "default": [],
+        "description": "群内永远直述的成员 QQ（跨所有群）"
+      }
+    }
+  },
+  "lists": {
+    "type": "object",
+    "description": "黑白名单（黑名单优先；白名单留空=放行全部）",
+    "items": {
+      "group_blacklist": {
+        "type": "list",
+        "default": [],
+        "description": "不转述的群号"
+      },
+      "group_whitelist": {
+        "type": "list",
+        "default": [],
+        "description": "只转述这些群号"
+      },
+      "private_blacklist": {
+        "type": "list",
+        "default": [],
+        "description": "不转述的私聊 QQ"
+      },
+      "private_whitelist": {
+        "type": "list",
+        "default": [],
+        "description": "只转述这些私聊 QQ"
+      },
+      "sender_blacklist": {
+        "type": "list",
+        "default": [],
+        "description": "所有群都忽略的成员 QQ"
+      }
+    }
+  },
+  "digest": {
+    "type": "object",
+    "description": "群摘要：什么时候出摘要、摘要怎么写",
+    "items": {
+      "mode": {
+        "type": "string",
+        "options": ["plain", "llm"],
+        "default": "plain",
+        "description": "plain=规则拼接（零成本）；llm=LLM 一句话摘要（失败自动回退 plain）"
+      },
+      "trigger_count": {
+        "type": "int",
+        "default": 15,
+        "description": "攒够 N 条未播报消息即出摘要"
+      },
+      "trigger_idle_sec": {
+        "type": "int",
+        "default": 180,
+        "description": "群静默 N 秒且仍有未播报消息即出摘要"
+      },
+      "hot_window_sec": {
+        "type": "int",
+        "default": 60,
+        "description": "热度统计窗口（秒）"
+      },
+      "hot_count": {
+        "type": "int",
+        "default": 10,
+        "description": "窗口内达到 N 条立即出摘要"
+      },
+      "cooldown_sec": {
+        "type": "int",
+        "default": 60,
+        "description": "两次摘要最小间隔（缓冲溢出时无视）"
+      },
+      "max_buffer": {
+        "type": "int",
+        "default": 50,
+        "description": "每群缓冲上限（超出裁旧）"
+      },
+      "max_len": {
+        "type": "int",
+        "default": 100,
+        "description": "摘要气泡最大字符数"
+      },
+      "llm_timeout_sec": {
+        "type": "int",
+        "default": 45,
+        "description": "LLM 摘要超时秒数（超时回退 plain；思考型模型如 kimi-k2.5 建议 ≥45）"
+      },
+      "llm_disable_thinking": {
+        "type": "bool",
+        "default": true,
+        "description": "摘要调用时关闭思考型模型的推理（kimi-k2.5 等；若你的 provider 报「未知参数」错误则关掉）"
+      }
+    }
+  },
+  "min_interval": {
+    "type": "float",
+    "default": 3.0,
+    "description": "直述车道两次气泡最小间隔秒数"
+  },
+  "max_text_len": {
+    "type": "int",
+    "default": 60,
+    "description": "单条直述气泡最大字符数"
+  },
+  "bubble_duration": {
+    "type": "int",
+    "default": 8,
+    "description": "气泡停留秒数"
+  },
+  "expression_duration": {
+    "type": "int",
+    "default": 15,
+    "description": "表情保持秒数（到期服务端自动回默认表情；0=保持）"
+  }
+}

@@ -268,6 +268,7 @@ astrbot ──MCP stdio──▶ server.py(set_expression)
 - **R1 astrbot 接入拓扑**：astrbot 以 stdio 拉起 `python server.py`（env 传 `BONGOCAT_*` 覆盖）；建议的系统提示词让 agent 先 `get_cat_status` 再动作；"猫格化回复"可在 agent 侧封装 `type_text + show_bubble` 组合。
 - **R5 单守护进程**：把 dashboard 与 MCP server 合并为一个进程（FastAPI 挂 `/mcp` Streamable HTTP 路由），driver 实例唯一，消除 K2；仪表盘与 MCP 的事件日志也随之合一（解决 K6）。
 - **R2 实时推送**：`/api/events` 加 SSE（FastAPI 原生支持），前端 EventSource 替代 3s 轮询；seq 游标模型可直接复用。
+- **R8 多源命令缓存队列**：dispatch 层命令排队串行化——多 agent / 多入口并发调用时排队执行而非互相覆盖，消除气泡 last-writer-wins 丢内容、表情回落跨进程语义互踩、mver 和弦时序互踩（同进程并发工具调用同样受益）。与 R5 互补：R5 把进程合一，R8 在进程内把命令排成一列；若 R5 先落地，R8 即其调度内核。背景：2026-08-20 多 agent 并发冲突分析（astrbot + ZCode 同机接入场景）。
 
 ## 11. 测试策略
 

@@ -1,0 +1,6 @@
+name: astrbot_plugin_bongocat
+version: 0.1.0
+author: bongocat-mcp
+desc: QQ 消息经桌宠猫气泡/表情转述——私聊与命中规则(@bot/关键词/白名单成员)的消息逐条播报，群聊出可配置摘要；由 bongocat-mcp 仪表盘 HTTP 驱动，猫的表情列表自动识别、无表情能力时自动降级
+repo: https://github.com/example/astrbot_plugin_bongocat
+display_name: BongoCat 桌宠播报
