@@ -33,6 +33,10 @@
 
 ## 快速开始
 
+**Windows 一键启动**：双击 `start.bat`——首次自动创建虚拟环境、安装依赖、生成
+`config.json`，随后后台启动仪表盘并自动打开浏览器（重复运行不会重复启动）；
+停止后台服务双击 `stop.bat`（同时结束独立 mver 镜像）。
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate            # Windows；macOS/Linux: source .venv/bin/activate
@@ -181,6 +185,7 @@ bongocat-mcp\
   dashboard.py            # FastAPI 仪表盘
   web\index.html          # 仪表盘前端（原生单页，无构建）
   mver-mirror.py          # Mver 独立镜像进程
+  start.bat / stop.bat    # Windows 一键启动 / 停止（首次自动建环境）
   zcode-plugin\           # ZCode 插件（本地市场 + bongocat-notify）
   claude-plugin\          # Claude Code 插件（本地市场 + bongocat-notify）
   codex-plugin\           # Codex CLI 插件（本地市场 + bongocat-notify）
