@@ -15,3 +15,7 @@ docs/blog-bongocat-mcp.md
 
 # 一次性调查脚本与桌面截图：本地内容，不入库
 _investigate/
+
+# 打包产物：仅保留 packaging/ 内的构建脚本与说明
+packaging/build/
+packaging/dist/

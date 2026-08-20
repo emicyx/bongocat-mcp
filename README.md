@@ -33,6 +33,14 @@
 
 ## 快速开始
 
+**免安装打包版（推荐）**：下载
+[bongocat-mcp-windows-x64.zip](https://pan.baidu.com/s/1Ord20GZjHjCnpK4yvOWGBg?pwd=s4tf)
+（百度网盘，提取码 `s4tf`），解压后双击 `bongocat-mcp.exe` 即用，**无需安装
+Python**——使用说明见压缩包内的 `README.md`。
+
+**自行构建**：双击 `packaging\build.bat` 一键构建（PyInstaller，产物在
+`packaging\dist\`，不入库）——构建与适配说明见 [packaging/README.md](packaging/README.md)。
+
 **Windows 一键启动**：双击 `start.bat`——首次自动创建虚拟环境、安装依赖、生成
 `config.json`，随后后台启动仪表盘并自动打开浏览器（重复运行不会重复启动）；
 停止后台服务双击 `stop.bat`（同时结束独立 mver 镜像）。
