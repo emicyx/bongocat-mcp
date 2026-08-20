@@ -547,9 +547,19 @@ class MverUdpDriver(CatDriver):
             return {"ok": True}
 
         if cmd in (CMD_SHOW_BUBBLE, CMD_HIDE_BUBBLE):
-            from bongocat_mcp.bubble.overlay import bubble_overlay, duration_to_auto_hide_ms
+            from bongocat_mcp.bubble.overlay import (
+                bubble_overlay, duration_to_auto_hide_ms, ensure_overlay,
+            )
             if cmd == CMD_SHOW_BUBBLE:
-                bubble_overlay().show(
+                # 猫不在线直接跳过：气泡是时效性通知，不排队也不在猫恢复后补发
+                # （否则只能在屏幕外空转过期，且调用侧还会拿到假 ok）
+                if not w32.find_window(title_contains=MVER_WINDOW_TITLE):
+                    return {"ok": False,
+                            "error": "猫窗口当前不在线，气泡已跳过（不会在猫恢复后补发）"}
+                overlay = ensure_overlay()
+                if overlay is None:
+                    return {"ok": False, "error": "气泡渲染线程未能启动"}
+                overlay.show(
                     payload["text"], title_contains=MVER_WINDOW_TITLE,
                     auto_hide_ms=duration_to_auto_hide_ms(payload.get("duration")),
                 )

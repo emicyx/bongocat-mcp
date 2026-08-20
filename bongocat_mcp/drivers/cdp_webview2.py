@@ -412,8 +412,7 @@ class CdpWebview2Driver(CatDriver):
 
         if cmd in (CMD_SHOW_BUBBLE, CMD_HIDE_BUBBLE):
             from bongocat_mcp.bubble.overlay import (
-                bubble_overlay,
-                duration_to_auto_hide_ms,
+                bubble_overlay, duration_to_auto_hide_ms, ensure_overlay,
             )
             if cmd == CMD_SHOW_BUBBLE:
                 self._ensure_attached()
@@ -422,7 +421,14 @@ class CdpWebview2Driver(CatDriver):
                         name_contains="bongo", name_excludes=("mver", "ui", "converter"),
                     )
                     self.pid = found[0] if found else None
-                bubble_overlay().show(
+                # 猫不在线直接跳过：气泡是时效性通知，不排队也不在猫恢复后补发
+                if not w32.find_window(pid=self.pid, title_contains="bongo"):
+                    return {"ok": False,
+                            "error": "猫窗口当前不在线，气泡已跳过（不会在猫恢复后补发）"}
+                overlay = ensure_overlay()
+                if overlay is None:
+                    return {"ok": False, "error": "气泡渲染线程未能启动"}
+                overlay.show(
                     payload["text"], pid=self.pid, title_contains="bongo",
                     auto_hide_ms=duration_to_auto_hide_ms(payload.get("duration")),
                 )

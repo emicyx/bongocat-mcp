@@ -150,6 +150,18 @@ def find_window(
     return None
 
 
+def root_window(hwnd: int) -> int:
+    """取窗口所属的顶层窗口 HWND（GA_ROOT）。
+
+    tkinter 的 winfo_id/frame 返回的是 wrapper 内部的 Tk 子窗口，
+    扩展样式必须设到顶层 wrapper 上才生效（点击穿透等）。
+    """
+    user32.GetAncestor.argtypes = [wt.HWND, ctypes.c_uint]
+    user32.GetAncestor.restype = wt.HWND
+    top = user32.GetAncestor(hwnd, 2)  # GA_ROOT
+    return int(top) if top else hwnd
+
+
 def window_exists(hwnd: int) -> bool:
     return bool(user32.IsWindow(hwnd) and user32.IsWindowVisible(hwnd))
 
