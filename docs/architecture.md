@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| 版本 | v1.1 |
-| 日期 | 2026-08-19 |
-| 状态 | 与代码同步（含 2026-08-19 仪表盘缺陷修复） |
+| 版本 | v1.2 |
+| 日期 | 2026-08-20 |
+| 状态 | 与代码同步（含 2026-08-20 免安装打包与猫进程误杀修复） |
 | 关联文档 | [需求书](requirements.md)、[README](../README.md) |
 
 ---
@@ -49,6 +49,7 @@
 
 - **三个入口 = 三个独立进程**，各自 `resolve_driver` 得到自己的 driver 实例。embedded/cdp 天然无冲突；mver 的两路镜像发送相同状态帧，属良性叠加；气泡 overlay 按进程各一份（已知限制，见 §9）。
 - **命令面唯一**：MCP 工具、仪表盘试玩台、`test_client.py` 走的都是同一个 `dispatch()`，能力门控 / 事件日志 / 失效重试只写一处。
+- **打包版同构**：`packaging/` 打出的免安装 exe 是同一套三入口的宿主包装（无参=仪表盘 / `server` / `mirror` / `stop`），适配全部经环境变量与数据文件落位完成、不改源码（设计见 [packaging/README.md](../packaging/README.md)）。
 
 ## 2. 模块清单与职责
 
@@ -71,6 +72,7 @@ bongocat-mcp\
   web\index.html          仪表盘前端（原生单页，无构建）
   mver-mirror.py          独立镜像进程入口
   test_client.py          MCP client 侧全工具回归
+  packaging\              免安装打包（launcher.py 冻结入口 + PyInstaller spec + build.bat；产物不入库）
 ```
 
 ## 3. 关键设计决策
@@ -104,6 +106,7 @@ bongocat-mcp\
 **细节**：
 
 - 启动猫进程必须 `DETACHED_PROCESS | DEVNULL`——猫不能继承 MCP server 的 stdio，否则污染协议通道。
+- 猫进程识别为**子串匹配**：映像名含 `bongo` 且不含 `mver/ui/converter/mcp`。排除 `mcp` 是打包版 exe（`bongocat-mcp.exe`）的**命名契约**——漏掉会把控制器自身当成猫接管（taskkill 后再当猫重启，见 §9-14）。
 - `_CDPSession` 为"后台 asyncio loop 线程 + 持久 WS"：同步调用面经 `run_coroutine_threadsafe`，等待响应时按 msgid 过滤；WS 中途断开则重置重试一次。
 - 键名直接发 rdev 风格（`KeyA`/`Num1`/`Space`），复用前端 useDevice 的归一化。
 
@@ -250,6 +253,7 @@ astrbot ──MCP stdio──▶ server.py(set_expression)
 11. （用户反馈）`mver-mirror.py` 直接启动会常驻一个终端窗口。→ 默认自转生为无控制台后台进程（`CREATE_NO_WINDOW`，pid 记录在 `.mver-mirror.pid`）；`--visible` 保留前台调试（Ctrl+C），`--stop` 按 pidfile 结束隐藏进程。已实测：隐藏进程主窗口句柄为 0，stop/重启生命周期正常。
 12. （用户反馈）仪表盘同样常驻终端窗口。→ `dashboard.py` 采用与镜像一致的隐藏模式（pidfile `.dashboard.pid` + `--stop` / `--visible`），并增加端口代检：已有实例在监听时在原终端提示"已在运行"而非无声失败（隐藏进程的报错不可见）。已实测：隐藏运行 HTTP 200、主窗口句柄 0、重复启动有提示。
 13. （三 driver 全量验证中发现）`server.py` 的 `list_expressions`/`list_motions` 在 embedded 返回 `modelInfo: null`（如猫未加载模型）时抛 `'NoneType' object has no attribute 'get'`——键存在但值为 null 时 `.get("modelInfo", {})` 的默认值不生效。→ 链式 `or {}` 防御，空模型时返回空列表（实测 isError=false）。
+14. （打包联调中发现，2026-08-20）猫进程识别的子串匹配不排除本项目进程：`bongocat-mcp.exe` 含 `bongo` 且不含任何排除词，会被 cdp 接管当成猫 `taskkill /F /T`——表象为打包 exe 启动后约一个探测周期即无声退出（退出码 1、无任何报错，极易误判为杀软）；终端用户机器上一只猫都没跑时更会"杀掉自己再把自己当猫重启"无限循环，常驻仪表盘的 5s 新猫探测也会周期性误杀它。→ 排除词加 `"mcp"`（`detect.py` 1 处 + `cdp_webview2.py` 5 处）；因此**打包 exe 名含 `mcp` 成为命名契约**（勿改成含 `bongo` 而不含 `mcp` 的名字，已写入用户 README）。
 
 **未修（登记在案）**：
 
@@ -265,6 +269,7 @@ astrbot ──MCP stdio──▶ server.py(set_expression)
 
 ## 10. 演进方向（对应需求书 Roadmap）
 
+- **R7 分发（已于 2026-08-20 落地）**：`packaging/` 以 PyInstaller onedir 产出免安装 exe（zip 解压双击即用、无需 Python，README 提供网盘下载链接；MCP client 以 `bongocat-mcp.exe server` 接入）。构建与打包适配见 [packaging/README.md](../packaging/README.md)，不再列为演进项。
 - **R1 astrbot 接入拓扑**：astrbot 以 stdio 拉起 `python server.py`（env 传 `BONGOCAT_*` 覆盖）；建议的系统提示词让 agent 先 `get_cat_status` 再动作；"猫格化回复"可在 agent 侧封装 `type_text + show_bubble` 组合。
 - **R5 单守护进程**：把 dashboard 与 MCP server 合并为一个进程（FastAPI 挂 `/mcp` Streamable HTTP 路由），driver 实例唯一，消除 K2；仪表盘与 MCP 的事件日志也随之合一（解决 K6）。
 - **R2 实时推送**：`/api/events` 加 SSE（FastAPI 原生支持），前端 EventSource 替代 3s 轮询；seq 游标模型可直接复用。

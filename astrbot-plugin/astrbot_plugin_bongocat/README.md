@@ -11,7 +11,8 @@ QQ 消息经桌宠猫（BongoCat）气泡/表情转述：私聊与命中规则�
 ## 前置条件
 
 1. bongocat-mcp 仪表盘在跑：`python dashboard.py`（默认 `127.0.0.1:8766`，
-   猫也被它接管驱动）。仪表盘/猫不在线时插件静默跳过，不影响机器人收发消息。
+   猫也被它接管驱动；免安装打包版：双击 `bongocat-mcp.exe` 即为仪表盘）。
+   仪表盘/猫不在线时插件静默跳过，不影响机器人收发消息。
 2. AstrBot ≥ v4.0（开发基线 v4.25.1，aiocqhttp + NapCat 实测环境）。
 3. 无额外 pip 依赖（HTTP 用 AstrBot 自带 aiohttp）。
 

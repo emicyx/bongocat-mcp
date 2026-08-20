@@ -59,7 +59,8 @@ ZCode MCP  ──stdio──> server.py（bongocat-mcp）───────�
 
 ## 安装（本机）
 
-1. 确保猫和仪表盘在跑：`python dashboard.py`
+1. 确保猫和仪表盘在跑：`python dashboard.py`（免安装打包版：双击
+   `bongocat-mcp.exe` 即为仪表盘）
 2. Zcode → 设置 → 插件管理 → 发现 → `+` 添加市场，选择本地目录：
    `D:\pycharm\pycharmprojects\bongocat-mcp\zcode-plugin`
 3. 在市场中安装 **bongocat-notify**（新插件默认启用，hooks 自动激活）

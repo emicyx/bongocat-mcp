@@ -72,7 +72,8 @@ Claude Code MCP  ──stdio──> server.py（bongocat-mcp）─────�
 
 ## 安装（本机）
 
-1. 确保猫和仪表盘在跑：`python dashboard.py`
+1. 确保猫和仪表盘在跑：`python dashboard.py`（免安装打包版：双击
+   `bongocat-mcp.exe` 即为仪表盘）
 2. 添加本地市场并安装（任选交互或 CLI）：
    ```
    claude plugin marketplace add D:\pycharm\pycharmprojects\bongocat-mcp\claude-plugin

@@ -213,6 +213,7 @@ bongocat-mcp\
   web\index.html          # 仪表盘前端（原生单页，无构建）
   mver-mirror.py          # Mver 独立镜像进程
   start.bat / stop.bat    # Windows 一键启动 / 停止（首次自动建环境）
+  packaging\              # 免安装打包（launcher + PyInstaller spec + build.bat；产物不入库）
   zcode-plugin\           # ZCode 插件（本地市场 + bongocat-notify）
   claude-plugin\          # Claude Code 插件（本地市场 + bongocat-notify）
   codex-plugin\           # Codex CLI 插件（本地市场 + bongocat-notify）

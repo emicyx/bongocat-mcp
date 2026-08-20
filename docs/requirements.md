@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| 版本 | v1.1 |
-| 日期 | 2026-08-19 |
-| 状态 | 已实现（本文同时作为后续演进的基线） |
+| 版本 | v1.2 |
+| 日期 | 2026-08-20 |
+| 状态 | 已实现（本文同时作为后续演进的基线；R7 分发已于 2026-08-20 落地） |
 | 关联文档 | [架构实现书](architecture.md)、[README](../README.md) |
 
 ---
@@ -195,6 +195,7 @@ Mver 处于接收模式（忽略本机键鼠）时，driver 内置 60fps 发送�
 4. **双进程并存**：仪表盘与 astrbot 的 stdio server 各持独立 driver 实例——embedded/cdp 无冲突，mver 双镜像为良性叠加，但聊天气泡可能各渲染一个。
 5. **协议稳定性**：mver UDP 协议与 cdp 页面结构（pinia store 形状）为逆向/实证所得，上游更新可能失效，需要回归。
 6. **边界-诚实性**：`set_hand` / `set_parameter` 仅 embedded 支持（其他谱系无对应事件面），能力矩阵如实标 ❌。
+7. **打包版命名契约**：免安装 exe（`bongocat-mcp.exe`）名字含 `mcp` 是猫进程识别排除词的一部分——改成含 `bongo` 而不含 `mcp` 的名字会被 cdp 接管误当成猫结束（详见架构书 §9-14）。
 
 ## 8. Roadmap（未实现，按优先级）
 
@@ -206,7 +207,7 @@ Mver 处于接收模式（忽略本机键鼠）时，driver 内置 60fps 发送�
 | R4 | 多猫并行 | driver 多实例管理与路由（当前 cdp/mver 均单实例） |
 | R5 | 单守护进程 | dashboard 与 MCP server 合一（MCP 走 Streamable HTTP transport），消除双进程气泡重复问题 |
 | R6 | 跨平台 | macOS 镜像层（rdev 等价物）与窗口管理 |
-| R7 | 分发 | uvx / pyinstaller 打包，降低安装门槛 |
+| R7 | 分发 | ✅ **已实现（2026-08-20）**：`packaging/` 以 PyInstaller onedir 打出免安装 zip（解压双击即用、无需 Python），README 提供网盘下载链接，MCP client 以 `bongocat-mcp.exe server` 接入。uvx 分发渠道待做 |
 | R8 | **多源命令缓存队列** | dispatch 层引入命令队列：多 agent / 多入口（MCP stdio、仪表盘 HTTP、hooks、AstrBot 插件）并发调用时排队串行执行而非互相覆盖——消除气泡 last-writer-wins 丢内容、表情回落跨进程互踩、mver 和弦时序互踩（同进程并发工具调用同样受益）。与 R5 互补：R5 把进程合一，R8 在进程内把命令排成一列；若 R5 先落地，R8 即其调度内核。背景：2026-08-20 多 agent 并发冲突分析 |
 
 ## 9. 验收与测试矩阵
