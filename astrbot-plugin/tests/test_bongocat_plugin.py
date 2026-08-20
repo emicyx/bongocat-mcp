@@ -395,7 +395,7 @@ async def t_status_command():
     async for r in p.bongocat_status(make_event(private=True)):
         results.append(r)
     text = results[0][1]
-    assert "driver=stub" in text and "表情=有" in text
+    assert "driver=stub" in text and "表情=有" in text and "v0.2.0" in text
 
 
 async def t_on_message_swallows_errors():

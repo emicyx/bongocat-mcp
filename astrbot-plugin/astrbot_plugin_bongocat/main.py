@@ -49,6 +49,8 @@ _EXPR_BACKOFF = 600.0     # 猫无表情能力 / 仪表盘不可达时的退避�
 _HTTP_TIMEOUT = 3.0       # 仪表盘短超时：绝不让播报链路拖慢消息管线
 _DIGEST_SPACING = 1.2     # 摘要车道全局最小间隔（防多群同时触发互相覆盖气泡）
 
+__version__ = "0.2.0"
+
 
 def _deep(cfg: dict, *path: str, default: Any = None) -> Any:
     """防御式读嵌套配置：Schema 升级或旧配置缺键时不崩，回落默认值。"""
@@ -63,6 +65,8 @@ def _deep(cfg: dict, *path: str, default: Any = None) -> Any:
 class BongoCatPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
+        # 版本落日志：排障时第一时间确认内存里跑的是哪版（避免"改了没生效"的误判）
+        logger.info(f"[bongocat] astrbot_plugin_bongocat v{__version__} 已加载")
         self.config = config
         self._last_direct = 0.0                  # 直述车道节流游标
         self._last_digest_any = 0.0              # 摘要车道全局间隔游标
@@ -431,7 +435,7 @@ class BongoCatPlugin(Star):
             for g, b in self._buffers.items() if b) or "空"
         mode = _deep(self.config, "digest", "mode", default="plain")
         yield event.plain_result(
-            f"[bongocat] driver={status.get('driver')} 在线={online} "
+            f"[bongocat] v{__version__} driver={status.get('driver')} 在线={online} "
             f"能力数={len(caps)}（表情={'有' if 'set-expression' in caps else '无'}） "
             f"摘要模式={mode} 待摘要缓冲：{buffers}")
 
